@@ -4,3 +4,4 @@ __pycache__/
 *.db
 .idea/
 .vscode/
+google_service_account.json
