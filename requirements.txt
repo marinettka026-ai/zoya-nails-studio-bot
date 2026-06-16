@@ -1,0 +1,5 @@
+aiogram
+python-dotenv
+aiosqlite
+google-api-python-client
+google-auth
