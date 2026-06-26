@@ -7,7 +7,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 
-from config import ADMIN_ID
+from config import ADMIN_IDS
 from database.queries import (
     get_clients_with_stats,
     get_client_by_id,
@@ -89,7 +89,7 @@ def client_card_keyboard(client):
 
 @router.message(F.text == UA_BUTTONS["admin_clients"])
 async def admin_clients(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ У вас немає доступу.")
         return
 
@@ -110,7 +110,7 @@ async def admin_clients(message: Message):
 
 @router.callback_query(F.data == "clients_list")
 async def clients_list(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -126,7 +126,7 @@ async def clients_list(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("client_card:"))
 async def client_card(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -160,7 +160,7 @@ async def client_card(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("client_note:"))
 async def client_note_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -179,7 +179,7 @@ async def client_note_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ClientNoteState.waiting_note)
 async def client_note_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     data = await state.get_data()
@@ -198,7 +198,7 @@ async def client_note_save(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("block_client:"))
 async def block_client(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -212,7 +212,7 @@ async def block_client(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("unblock_client:"))
 async def unblock_client(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -226,7 +226,7 @@ async def unblock_client(callback: CallbackQuery):
 
 @router.callback_query(F.data == "clients_back_admin")
 async def clients_back_admin(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 

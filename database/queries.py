@@ -579,17 +579,15 @@ async def get_busy_bookings_by_master_and_date(master_id: int, date: str):
         cursor = await db.execute(
             """
             SELECT
-                bookings.id,
-                bookings.date,
-                bookings.time,
-                bookings.status,
-                services.duration
+                id,
+                date,
+                time,
+                status,
+                total_duration
             FROM bookings
-            JOIN services ON bookings.service_id = services.id
-            WHERE bookings.master_id = ?
-            AND bookings.date = ?
-            AND bookings.status IN (
-                'pending_payment',
+            WHERE master_id = ?
+            AND date = ?
+            AND status IN (
                 'waiting_confirmation',
                 'confirmed'
             )
@@ -669,3 +667,212 @@ async def set_client_blocked(client_id: int, is_blocked: int):
             (is_blocked, client_id),
         )
         await db.commit()
+
+
+async def get_main_services_by_master(master_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM services
+            WHERE master_id = ?
+            AND is_active = 1
+            AND service_type = 'main'
+            ORDER BY category_ua, name_ua
+            """,
+            (master_id,),
+        )
+
+        return await cursor.fetchall()
+
+
+async def get_service_extras(service_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM service_extras
+            WHERE service_id = ?
+            AND is_active = 1
+            ORDER BY name_ua
+            """,
+            (service_id,),
+        )
+
+        return await cursor.fetchall()
+
+
+async def get_bookings_by_date(date: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                bookings.*,
+                services.resource_type
+            FROM bookings
+            JOIN services
+                ON bookings.service_id = services.id
+            WHERE bookings.date = ?
+            AND bookings.status IN (
+                'waiting_confirmation',
+                'confirmed'
+            )
+            """,
+            (date,),
+        )
+
+        return await cursor.fetchall()
+
+
+async def get_resource_usage(date: str):
+    bookings = await get_bookings_by_date(date)
+
+    manicure_count = 0
+    pedicure_count = 0
+
+    for booking in bookings:
+        if booking["resource_type"] == "manicure":
+            manicure_count += 1
+
+        elif booking["resource_type"] == "pedicure":
+            pedicure_count += 1
+
+    return {
+        "manicure": manicure_count,
+        "pedicure": pedicure_count,
+    }
+
+
+async def get_extra_by_id(extra_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM service_extras
+            WHERE id = ?
+            AND is_active = 1
+            """,
+            (extra_id,),
+        )
+
+        return await cursor.fetchone()
+
+
+async def get_extras_by_ids(extra_ids: list[int]):
+    if not extra_ids:
+        return []
+
+    placeholders = ",".join("?" for _ in extra_ids)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            f"""
+            SELECT *
+            FROM service_extras
+            WHERE id IN ({placeholders})
+            AND is_active = 1
+            """,
+            extra_ids,
+        )
+
+        return await cursor.fetchall()
+
+
+async def add_service_extra(
+    master_id: int,
+    category_ua: str,
+    category_pt: str,
+    name_ua: str,
+    name_pt: str,
+    price: float,
+    duration: int,
+):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO service_extras (
+                service_id,
+                master_id,
+                category_ua,
+                category_pt,
+                name_ua,
+                name_pt,
+                price,
+                duration,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (
+                0,
+                master_id,
+                category_ua,
+                category_pt,
+                name_ua,
+                name_pt,
+                price,
+                duration,
+            ),
+        )
+
+        await db.commit()
+
+
+async def get_service_extras_by_category(master_id: int, category_ua: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT *
+            FROM service_extras
+            WHERE master_id = ?
+            AND category_ua = ?
+            AND is_active = 1
+            ORDER BY name_ua
+            """,
+            (master_id, category_ua),
+        )
+
+        return await cursor.fetchall()
+
+
+async def get_bookings_with_resource_by_date(date: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                bookings.id,
+                bookings.master_id,
+                bookings.service_id,
+                bookings.date,
+                bookings.time,
+                bookings.status,
+                bookings.total_duration,
+                services.duration AS service_duration,
+                services.resource_type
+            FROM bookings
+            JOIN services
+                ON bookings.service_id = services.id
+            WHERE bookings.date = ?
+            AND bookings.status IN (
+                'waiting_confirmation',
+                'confirmed'
+            )
+            """,
+            (date,),
+        )
+
+        return await cursor.fetchall()

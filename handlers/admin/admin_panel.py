@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 
-from config import ADMIN_ID
+from config import ADMIN_IDS
 
 from database.queries import (
     get_active_masters,
@@ -18,11 +18,17 @@ from database.queries import (
     update_service,
     deactivate_service,
     get_all_users,
+    add_service_extra,
 )
 
 from keyboards.menus import admin_menu
 from locales.ua import TEXTS as UA_TEXTS, BUTTONS as UA_BUTTONS
-from states.admin_state import AddServiceState, EditServiceState, MailingState
+from states.admin_state import (
+    AddServiceState,
+    EditServiceState,
+    AddExtraState,
+    MailingState,
+)
 
 router = Router()
 
@@ -56,6 +62,12 @@ def admin_services_keyboard():
                 InlineKeyboardButton(
                     text=UA_BUTTONS["add_service"],
                     callback_data="admin_add_service",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✨ Додати додаткову послугу",
+                    callback_data="admin_add_extra",
                 )
             ],
             [
@@ -105,37 +117,56 @@ def masters_for_service_keyboard(masters):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def service_categories_keyboard():
+def masters_for_extra_keyboard(masters):
+    keyboard = []
+
+    for master in masters:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🌸 {master['name']}",
+                    callback_data=f"extra_master:{master['id']}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text=UA_BUTTONS["back"],
+                callback_data="back_to_services_menu",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def service_categories_keyboard(prefix: str = "sc"):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="💅 Манікюр жіночий",
-                    callback_data="sc:wm",
+                    callback_data=f"{prefix}:wm",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="👣 Педикюр жіночий",
-                    callback_data="sc:wp",
+                    callback_data=f"{prefix}:wp",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="🧔 Чоловічий манікюр та педикюр",
-                    callback_data="sc:ms",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="✨ Додаткові послуги",
-                    callback_data="sc:add",
+                    callback_data=f"{prefix}:ms",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text=UA_BUTTONS["back"],
-                    callback_data="back_to_service_master_choice",
+                    callback_data="back_to_services_menu",
                 )
             ],
         ]
@@ -288,7 +319,7 @@ def services_choose_keyboard(services, action: str):
 async def admin_panel(message: Message):
     print("ADMIN COMMAND FROM:", message.from_user.id)
 
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ У вас немає доступу до адмін-панелі.")
         return
 
@@ -300,7 +331,7 @@ async def admin_panel(message: Message):
 
 @router.message(F.text == UA_BUTTONS["admin_services"])
 async def admin_services_menu(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ У вас немає доступу.")
         return
 
@@ -312,7 +343,7 @@ async def admin_services_menu(message: Message):
 
 @router.callback_query(F.data == "admin_add_service")
 async def start_add_service(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -338,7 +369,7 @@ async def start_add_service(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("sm:"))
 async def choose_master_for_service(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -357,7 +388,7 @@ async def choose_master_for_service(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("sc:"))
 async def choose_service_category(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -385,7 +416,7 @@ async def choose_service_category(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AddServiceState.name_ua)
 async def add_service_name_ua(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     await state.update_data(name_ua=message.text)
@@ -400,7 +431,7 @@ async def add_service_name_ua(message: Message, state: FSMContext):
 
 @router.message(AddServiceState.name_pt)
 async def add_service_name_pt(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     await state.update_data(name_pt=message.text)
@@ -414,7 +445,7 @@ async def add_service_name_pt(message: Message, state: FSMContext):
 
 @router.message(AddServiceState.description_ua)
 async def add_service_description_ua(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     await state.update_data(description_ua=message.text)
@@ -428,7 +459,7 @@ async def add_service_description_ua(message: Message, state: FSMContext):
 
 @router.message(AddServiceState.description_pt)
 async def add_service_description_pt(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     await state.update_data(description_pt=message.text)
@@ -442,7 +473,7 @@ async def add_service_description_pt(message: Message, state: FSMContext):
 
 @router.message(AddServiceState.price)
 async def add_service_price(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     try:
@@ -465,7 +496,7 @@ async def add_service_price(message: Message, state: FSMContext):
 
 @router.message(AddServiceState.duration)
 async def add_service_duration(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     try:
@@ -506,7 +537,7 @@ async def add_service_duration(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_services_menu")
 async def back_to_services_menu(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -522,7 +553,7 @@ async def back_to_services_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_service_master_choice")
 async def back_to_service_master_choice(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -540,7 +571,7 @@ async def back_to_service_master_choice(callback: CallbackQuery, state: FSMConte
 
 @router.callback_query(F.data == "back_to_service_category")
 async def back_to_service_category(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -556,7 +587,7 @@ async def back_to_service_category(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_service_name_ua")
 async def back_to_service_name_ua(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -572,7 +603,7 @@ async def back_to_service_name_ua(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_service_name_pt")
 async def back_to_service_name_pt(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -589,7 +620,7 @@ async def back_to_service_name_pt(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_service_description_ua")
 async def back_to_service_description_ua(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -605,7 +636,7 @@ async def back_to_service_description_ua(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data == "back_to_service_description_pt")
 async def back_to_service_description_pt(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -621,7 +652,7 @@ async def back_to_service_description_pt(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data == "back_to_service_price")
 async def back_to_service_price(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -871,7 +902,7 @@ async def delete_service_handler(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_back")
 async def admin_back(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -904,9 +935,40 @@ def mailing_confirm_keyboard():
     )
 
 
+def extra_service_categories_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💅 Манікюр жіночий",
+                    callback_data="extra_sc:wm",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👣 Педикюр жіночий",
+                    callback_data="extra_sc:wp",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧔 Чоловічий манікюр та педикюр",
+                    callback_data="extra_sc:ms",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=UA_BUTTONS["back"],
+                    callback_data="back_to_services_menu",
+                )
+            ],
+        ]
+    )
+
+
 @router.message(F.text == UA_BUTTONS["admin_mailing"])
 async def admin_mailing_start(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ У вас немає доступу.")
         return
 
@@ -922,7 +984,7 @@ async def admin_mailing_start(message: Message, state: FSMContext):
 
 @router.message(MailingState.text)
 async def admin_mailing_get_content(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     if message.photo:
@@ -961,7 +1023,7 @@ async def admin_mailing_get_content(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "mailing_confirm_send")
 async def admin_mailing_send(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -1004,7 +1066,7 @@ async def admin_mailing_send(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "mailing_cancel")
 async def admin_mailing_cancel(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -1016,3 +1078,121 @@ async def admin_mailing_cancel(callback: CallbackQuery, state: FSMContext):
     )
 
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin_add_extra")
+async def start_add_extra(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+
+    masters = await get_active_masters()
+
+    if not masters:
+        await callback.message.answer("Спочатку додайте хоча б одного майстра.")
+        await callback.answer()
+        return
+
+    await state.clear()
+    await state.set_state(AddExtraState.master)
+
+    await callback.message.answer(
+        "✨ Додавання додаткової послуги\n\nОберіть майстра:",
+        reply_markup=masters_for_extra_keyboard(masters),
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(AddExtraState.master, F.data.startswith("extra_master:"))
+async def choose_master_for_extra(callback: CallbackQuery, state: FSMContext):
+    master_id = int(callback.data.split(":")[1])
+
+    await state.update_data(master_id=master_id)
+    await state.set_state(AddExtraState.category)
+
+    await callback.message.answer(
+        "Оберіть категорію, до якої буде додаткова послуга:",
+        reply_markup=extra_service_categories_keyboard(),
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(AddExtraState.category, F.data.startswith("extra_sc:"))
+async def choose_extra_category(callback: CallbackQuery, state: FSMContext):
+    category_key = callback.data.split(":")[1]
+    category = SERVICE_CATEGORIES.get(category_key)
+
+    if not category:
+        await callback.answer("Категорію не знайдено", show_alert=True)
+        return
+
+    await state.update_data(
+        category_ua=category["ua"],
+        category_pt=category["pt"],
+    )
+
+    await state.set_state(AddExtraState.name_ua)
+
+    await callback.message.answer("🇺🇦 Введіть назву додаткової послуги:")
+    await callback.answer()
+
+
+@router.message(AddExtraState.name_ua)
+async def add_extra_name_ua(message: Message, state: FSMContext):
+    await state.update_data(name_ua=message.text)
+    await state.set_state(AddExtraState.name_pt)
+
+    await message.answer("🇵🇹 Введіть назву португальською:")
+
+
+@router.message(AddExtraState.name_pt)
+async def add_extra_name_pt(message: Message, state: FSMContext):
+    await state.update_data(name_pt=message.text)
+    await state.set_state(AddExtraState.price)
+
+    await message.answer("💶 Введіть ціну додаткової послуги:")
+
+
+@router.message(AddExtraState.price)
+async def add_extra_price(message: Message, state: FSMContext):
+    try:
+        price = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Введіть ціну числом. Наприклад: 10")
+        return
+
+    await state.update_data(price=price)
+    await state.set_state(AddExtraState.duration)
+
+    await message.answer("⏳ Введіть тривалість у хвилинах:")
+
+
+@router.message(AddExtraState.duration)
+async def add_extra_duration(message: Message, state: FSMContext):
+    try:
+        duration = int(message.text)
+    except ValueError:
+        await message.answer("Введіть тривалість числом. Наприклад: 15")
+        return
+
+    await state.update_data(duration=duration)
+    data = await state.get_data()
+
+    await add_service_extra(
+        master_id=data["master_id"],
+        category_ua=data["category_ua"],
+        category_pt=data["category_pt"],
+        name_ua=data["name_ua"],
+        name_pt=data["name_pt"],
+        price=data["price"],
+        duration=data["duration"],
+    )
+
+    await state.clear()
+
+    await message.answer(
+        "✅ Додаткову послугу додано!",
+        reply_markup=admin_menu(),
+    )

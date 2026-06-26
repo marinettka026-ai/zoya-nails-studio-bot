@@ -50,8 +50,27 @@ async def create_tables():
             description_pt TEXT,
             price REAL NOT NULL,
             duration INTEGER NOT NULL,
+            service_type TEXT DEFAULT 'main',
             deposit_amount REAL DEFAULT 0,
+            resource_type TEXT DEFAULT 'manicure',
             is_active INTEGER DEFAULT 1,
+            FOREIGN KEY (master_id) REFERENCES masters (id)
+        )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS service_extras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            service_id INTEGER,
+            master_id INTEGER,
+            category_ua TEXT,
+            category_pt TEXT,
+            name_ua TEXT NOT NULL,
+            name_pt TEXT,
+            price REAL DEFAULT 0,
+            duration INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            FOREIGN KEY (service_id) REFERENCES services (id),
             FOREIGN KEY (master_id) REFERENCES masters (id)
         )
         """)
@@ -66,8 +85,11 @@ async def create_tables():
             client_phone TEXT,
             date TEXT NOT NULL,
             time TEXT NOT NULL,
-            status TEXT DEFAULT 'pending_payment',
-            payment_status TEXT DEFAULT 'pending',
+            total_price REAL DEFAULT 0,
+            total_duration INTEGER DEFAULT 0,
+            selected_extras TEXT,
+            status TEXT DEFAULT 'waiting_confirmation',
+            payment_status TEXT DEFAULT 'not_required',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (client_id) REFERENCES users (id),
             FOREIGN KEY (master_id) REFERENCES masters (id),
@@ -99,6 +121,20 @@ async def create_tables():
             pass
 
         try:
+            await db.execute(
+                "ALTER TABLE services ADD COLUMN service_type TEXT DEFAULT 'main'"
+            )
+        except:
+            pass
+
+        try:
+            await db.execute(
+                "ALTER TABLE services ADD COLUMN resource_type TEXT DEFAULT 'manicure'"
+            )
+        except:
+            pass
+
+        try:
             await db.execute("ALTER TABLE masters ADD COLUMN calendar_id TEXT")
         except:
             pass
@@ -115,32 +151,45 @@ async def create_tables():
         except:
             pass
 
-        await db.commit()
-
-
-async def get_busy_bookings_by_master_and_date(master_id: int, date: str):
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-
-        cursor = await db.execute(
-            """
-            SELECT
-                bookings.id,
-                bookings.date,
-                bookings.time,
-                bookings.status,
-                services.duration
-            FROM bookings
-            JOIN services ON bookings.service_id = services.id
-            WHERE bookings.master_id = ?
-            AND bookings.date = ?
-            AND bookings.status IN (
-                'pending_payment',
-                'waiting_confirmation',
-                'confirmed'
+        try:
+            await db.execute(
+                "ALTER TABLE bookings ADD COLUMN total_price REAL DEFAULT 0"
             )
-            """,
-            (master_id, date),
-        )
+        except:
+            pass
 
-        return await cursor.fetchall()
+        try:
+            await db.execute(
+                "ALTER TABLE bookings ADD COLUMN total_duration INTEGER DEFAULT 0"
+            )
+        except:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE bookings ADD COLUMN selected_extras TEXT")
+        except:
+            pass
+
+        try:
+            await db.execute(
+                "ALTER TABLE bookings ADD COLUMN payment_status TEXT DEFAULT 'not_required'"
+            )
+        except:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE service_extras ADD COLUMN master_id INTEGER")
+        except:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE service_extras ADD COLUMN category_ua TEXT")
+        except:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE service_extras ADD COLUMN category_pt TEXT")
+        except:
+            pass
+
+        await db.commit()

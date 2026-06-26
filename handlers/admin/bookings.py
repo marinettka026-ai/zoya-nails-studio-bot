@@ -6,7 +6,7 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 
-from config import ADMIN_ID
+from config import ADMIN_IDS
 
 from database.queries import (
     get_all_bookings,
@@ -126,7 +126,7 @@ def booking_details_keyboard(booking_id: int, phone: str = None):
 
 @router.message(F.text == UA_BUTTONS["admin_bookings"])
 async def admin_bookings(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ У вас немає доступу.")
         return
 
@@ -138,7 +138,7 @@ async def admin_bookings(message: Message):
 
 @router.callback_query(F.data == "admin_bookings_menu")
 async def admin_bookings_menu(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -152,7 +152,7 @@ async def admin_bookings_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_bookings_future")
 async def show_future_bookings(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -176,7 +176,7 @@ async def show_future_bookings(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_bookings_past")
 async def show_past_bookings(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -200,7 +200,7 @@ async def show_past_bookings(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_bookings_all")
 async def show_all_bookings(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -224,7 +224,7 @@ async def show_all_bookings(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_booking:"))
 async def admin_booking_details(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -268,7 +268,7 @@ async def admin_booking_details(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_cancel_booking_confirm:"))
 async def admin_cancel_booking_confirm(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -301,7 +301,7 @@ async def admin_cancel_booking_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_cancel_booking:"))
 async def admin_cancel_booking(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -321,7 +321,7 @@ async def admin_cancel_booking(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_bookings_back")
 async def admin_bookings_back(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
@@ -335,7 +335,7 @@ async def admin_bookings_back(callback: CallbackQuery):
 
 @router.message(F.text == "/clear_bookings")
 async def clear_bookings(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     await delete_all_bookings()

@@ -7,7 +7,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 
-from config import ADMIN_ID
+from config import ADMIN_IDS
 from database.queries import (
     add_master,
     get_active_masters,
@@ -69,7 +69,7 @@ def masters_choose_keyboard(masters, action: str):
 
 @router.message(F.text == UA_BUTTONS["admin_masters"])
 async def admin_masters_menu(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ У вас немає доступу.")
         return
 
@@ -119,7 +119,7 @@ async def back_admin_masters(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "admin_add_master")
 async def start_add_master(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Немає доступу", show_alert=True)
         return
 
