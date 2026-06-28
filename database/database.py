@@ -1,6 +1,7 @@
+import os
 import aiosqlite
 
-DB_NAME = "salon_booking.db"
+DB_NAME = os.getenv("DB_NAME", "salon_booking.db")
 
 
 async def create_tables():
