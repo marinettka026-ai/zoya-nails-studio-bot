@@ -119,7 +119,7 @@ def service_categories_keyboard(categories, language: str = "ua"):
     buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
     keyboard = []
 
-    for category in categories:
+    for index, category in enumerate(categories):
         category_name = (
             category["category_pt"]
             if language == "pt" and category["category_pt"]
@@ -130,7 +130,7 @@ def service_categories_keyboard(categories, language: str = "ua"):
             [
                 InlineKeyboardButton(
                     text=f"💅 {category_name}",
-                    callback_data=f"select_category:{category['category_ua']}",
+                    callback_data=f"select_category:{index}",
                 )
             ]
         )
@@ -471,13 +471,22 @@ async def select_category_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    category_ua = callback.data.split(":", 1)[1]
-
-    await state.update_data(category_ua=category_ua)
-    await state.set_state(BookingState.choosing_service)
+    category_index = int(callback.data.split(":")[1])
 
     data = await state.get_data()
     master_id = data["master_id"]
+
+    categories = await get_service_categories_by_master(master_id)
+
+    if category_index >= len(categories):
+        await callback.answer("Категорію не знайдено", show_alert=True)
+        return
+
+    category = categories[category_index]
+    category_ua = category["category_ua"]
+
+    await state.update_data(category_ua=category_ua)
+    await state.set_state(BookingState.choosing_service)
 
     language = await get_user_language(callback.from_user.id)
     texts, _ = get_texts_and_buttons(language)
