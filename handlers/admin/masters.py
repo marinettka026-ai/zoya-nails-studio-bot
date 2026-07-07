@@ -191,7 +191,15 @@ async def add_master_telegram_id(message: Message, state: FSMContext):
     await state.set_state(AddMasterState.schedule)
 
     await message.answer(
-        "🕒 Введіть графік роботи майстра.\n\n" "Наприклад: Пн-Сб 09:30–17:00"
+        "🕒 Введіть графік роботи майстра.\n\n"
+        "Приклад:\n"
+        "Пн: 08:30-18:30\n"
+        "Вт: 08:30-18:30\n"
+        "Ср: 08:30-18:30\n"
+        "Чт: 08:30-18:30\n"
+        "Пт: 08:30-18:30\n"
+        "Сб: вихідний\n"
+        "Нд: вихідний"
     )
 
 
@@ -373,7 +381,18 @@ async def edit_master_telegram_id(message: Message, state: FSMContext):
     await state.update_data(telegram_id=telegram_id)
     await state.set_state(EditMasterState.schedule)
 
-    await message.answer("🕒 Введіть новий графік або напишіть: залишити")
+    await message.answer(
+        "🕒 Введіть графік роботи.\n\n"
+        "Приклад:\n"
+        "Пн: 08:30-18:30\n"
+        "Вт: 08:30-18:30\n"
+        "Ср: 08:30-18:30\n"
+        "Чт: 08:30-18:30\n"
+        "Пт: 08:30-18:30\n"
+        "Сб: вихідний\n"
+        "Нд: вихідний\n\n"
+        "Або напишіть: залишити"
+    )
 
 
 @router.message(EditMasterState.schedule)

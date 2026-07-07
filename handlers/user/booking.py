@@ -240,9 +240,55 @@ def dates_keyboard(language: str = "ua"):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+DAY_NAMES_UA = {
+    0: "Пн",
+    1: "Вт",
+    2: "Ср",
+    3: "Чт",
+    4: "Пт",
+    5: "Сб",
+    6: "Нд",
+}
+
+
+def get_work_hours_for_date(schedule: str, selected_date: str):
+    if not schedule:
+        return None, None
+
+    selected_weekday = datetime.strptime(selected_date, "%Y-%m-%d").weekday()
+    day_name = DAY_NAMES_UA[selected_weekday]
+
+    for line in schedule.splitlines():
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if not line.startswith(day_name):
+            continue
+
+        if "вихідний" in line.lower():
+            return None, None
+
+        if ":" not in line:
+            continue
+
+        _, hours = line.split(":", 1)
+        hours = hours.strip()
+
+        if "-" not in hours:
+            continue
+
+        work_start, work_end = hours.split("-", 1)
+
+        return work_start.strip(), work_end.strip()
+
+    return None, None
+
+
 def generate_time_slots(
-    work_start: str = "09:30",
-    work_end: str = "17:30",
+    work_start: str,
+    work_end: str,
     duration: int = 60,
     step: int = 30,
 ):
@@ -253,7 +299,7 @@ def generate_time_slots(
 
     current = start
 
-    while current + timedelta(minutes=duration) <= end:
+    while current <= end:
         slots.append(current.strftime("%H:%M"))
         current += timedelta(minutes=step)
 
@@ -275,7 +321,19 @@ async def times_keyboard(
     duration = service["duration"]
     resource_type = service["resource_type"]
 
-    all_times = generate_time_slots(duration=duration)
+    work_start, work_end = get_work_hours_for_date(
+        master["schedule"],
+        selected_date,
+    )
+
+    if not work_start or not work_end:
+        all_times = []
+    else:
+        all_times = generate_time_slots(
+            work_start=work_start,
+            work_end=work_end,
+            duration=duration,
+        )
 
     busy_bookings = await get_busy_bookings_by_master_and_date(
         master_id=master["id"],
@@ -292,7 +350,6 @@ async def times_keyboard(
 
         slot_is_busy_in_db = False
 
-        # 1. Перевірка зайнятості конкретного майстра
         for booking in busy_bookings:
             busy_start = datetime.strptime(booking["time"], "%H:%M")
 
@@ -310,7 +367,6 @@ async def times_keyboard(
         if slot_is_busy_in_db:
             continue
 
-        # 2. Перевірка ресурсу салону: 2 манікюри, 1 педикюр
         resource_count = 0
 
         for booking in resource_bookings:
@@ -338,7 +394,6 @@ async def times_keyboard(
             )
             continue
 
-        # 3. Перевірка Google Calendar конкретного майстра
         if master["calendar_id"]:
             is_free = is_time_free(
                 calendar_id=master["calendar_id"],
