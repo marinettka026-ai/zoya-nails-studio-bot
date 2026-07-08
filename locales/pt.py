@@ -1,21 +1,21 @@
 TEXTS = {
-    "choose_language": ("🌸 ZoYA Nails Studio\n\n" "Оберіть мову / Escolha o idioma"),
-    "main_menu": ("🌸 ZoYA Nails Studio\n\n" "Escolha a opção desejada:"),
     "booking_rules": (
         "📌 Regras de marcação\n\n"
-        "Por favor, leia as condições antes de reservar 🌸\n\n"
-        "🗓 Alterações ou cancelamentos\n"
-        "Devem ser feitos com pelo menos 24 horas de antecedência.\n\n"
-        "💳 Sinal\n"
-        "A marcação é confirmada apenas após a confirmação do sinal.\n\n"
+        "Por favor, leia as condições antes de fazer a sua reserva 🌸\n\n"
+        "📅 Alteração ou cancelamento da marcação\n"
+        "Possível até 24 horas antes do início da visita.\n\n"
         "⏰ Atrasos\n"
-        "Atrasos superiores a 15 minutos podem reduzir o tempo do atendimento.\n"
-        "Atrasos de 30 minutos ou mais podem resultar no cancelamento da marcação "
-        "ou na realização do serviço sem aplicação de cor/gel.\n\n"
-        "❌ Falta / cancelamento de última hora\n"
-        "Poderá ser cobrado 50% do valor do serviço.\n\n"
-        "🌙 Horários fora do período normal\n"
-        "Só são possíveis mediante acordo prévio e têm custo adicional de +20€."
+        "• mais de 15 minutos — a mestre não pode garantir a realização completa do serviço;\n"
+        "• 30 minutos ou mais — a marcação pode ser cancelada ou o serviço pode ser feito sem aplicação de verniz/gel;\n"
+        "• após três ou mais atrasos, o estúdio pode recusar futuros atendimentos.\n\n"
+        "❌ Falta de comparência ou cancelamento em cima da hora\n"
+        "Em caso de falta ou cancelamento com menos de 24 horas de antecedência, "
+        "poderá ser cobrado 50% do valor do serviço. "
+        "A próxima marcação só será possível após a compensação desse valor.\n\n"
+        "🌙 Marcações fora do horário de trabalho\n"
+        "Mediante acordo prévio, é possível marcar em horário cedo ou tardio "
+        "(07:00–08:00 ou 19:00–20:00). "
+        "Este serviço tem um custo adicional de +20€."
     ),
     "choose_master": "👩 Escolha a profissional:",
     "choose_service": "💅 Escolha o serviço:",

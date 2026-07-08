@@ -34,6 +34,7 @@ from keyboards.inline import (
     booking_rules_keyboard,
     booking_confirm_keyboard,
     deposit_keyboard,
+    add_another_service_keyboard,
 )
 from keyboards.menus import main_menu
 from locales.ua import TEXTS as UA_TEXTS, BUTTONS as UA_BUTTONS
@@ -219,7 +220,7 @@ def dates_keyboard(language: str = "ua"):
 
     today = datetime.now()
 
-    for i in range(7):
+    for i in range(30):
         date = today + timedelta(days=i)
         date_text = date.strftime("%d.%m.%Y")
         callback_date = date.strftime("%Y-%m-%d")
@@ -568,15 +569,24 @@ async def select_service_handler(callback: CallbackQuery, state: FSMContext):
 
     service_id = int(callback.data.split(":")[1])
 
+    data = await state.get_data()
+
+    selected_services = data.get("selected_services", [])
+
+    current_service = {
+        "master_id": data["master_id"],
+        "service_id": service_id,
+        "category_ua": data["category_ua"],
+        "extras": [],
+    }
+
     await state.update_data(
         service_id=service_id,
         selected_extras=[],
+        current_service=current_service,
     )
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    data = await state.get_data()
 
     extras = await get_service_extras_by_category(
         master_id=data["master_id"],
@@ -597,11 +607,22 @@ async def select_service_handler(callback: CallbackQuery, state: FSMContext):
             reply_markup=extras_keyboard(extras, [], language),
         )
     else:
-        await state.set_state(BookingState.choosing_date)
+        selected_services.append(current_service)
+
+        await state.update_data(
+            selected_services=selected_services,
+            current_service=None,
+        )
+
+        text = (
+            "Deseja adicionar outro serviço?"
+            if language == "pt"
+            else "Бажаєте додати ще одну процедуру?"
+        )
 
         await callback.message.answer(
-            texts["choose_date"],
-            reply_markup=dates_keyboard(language),
+            text,
+            reply_markup=add_another_service_keyboard(language),
         )
 
     await callback.answer()
@@ -614,15 +635,30 @@ async def toggle_extra_handler(callback: CallbackQuery, state: FSMContext):
 
     extra_id = int(callback.data.split(":")[1])
 
-    await state.update_data(selected_extras=[extra_id])
-    await state.set_state(BookingState.choosing_date)
+    data = await state.get_data()
+    current_service = data.get("current_service")
+    selected_services = data.get("selected_services", [])
+
+    current_service["extras"] = [extra_id]
+    selected_services.append(current_service)
+
+    await state.update_data(
+        selected_services=selected_services,
+        current_service=None,
+        selected_extras=[extra_id],
+    )
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
+
+    text = (
+        "Deseja adicionar outro serviço?"
+        if language == "pt"
+        else "Бажаєте додати ще одну процедуру?"
+    )
 
     await callback.message.answer(
-        texts["choose_date"],
-        reply_markup=dates_keyboard(language),
+        text,
+        reply_markup=add_another_service_keyboard(language),
     )
 
     await callback.answer()
@@ -633,7 +669,59 @@ async def extras_skip_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    await state.update_data(selected_extras=[])
+    data = await state.get_data()
+    current_service = data.get("current_service")
+    selected_services = data.get("selected_services", [])
+
+    current_service["extras"] = []
+    selected_services.append(current_service)
+
+    await state.update_data(
+        selected_services=selected_services,
+        current_service=None,
+        selected_extras=[],
+    )
+
+    language = await get_user_language(callback.from_user.id)
+
+    text = (
+        "Deseja adicionar outro serviço?"
+        if language == "pt"
+        else "Бажаєте додати ще одну процедуру?"
+    )
+
+    await callback.message.answer(
+        text,
+        reply_markup=add_another_service_keyboard(language),
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "add_another_service")
+async def add_another_service_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
+
+    language = await get_user_language(callback.from_user.id)
+    texts, _ = get_texts_and_buttons(language)
+
+    masters = await get_active_masters()
+
+    await state.set_state(BookingState.choosing_master)
+
+    await callback.message.answer(
+        texts["choose_master"],
+        reply_markup=masters_keyboard(masters, language),
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "continue_booking")
+async def continue_booking_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
 
     language = await get_user_language(callback.from_user.id)
     texts, _ = get_texts_and_buttons(language)

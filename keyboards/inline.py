@@ -102,3 +102,29 @@ def master_booking_keyboard(language: str = "ua"):
             ],
         ]
     )
+
+
+def add_another_service_keyboard(language: str = "ua"):
+    if language == "pt":
+        add_text = "➕ Adicionar outro serviço"
+        continue_text = "➡️ Continuar marcação"
+    else:
+        add_text = "➕ Додати ще одну процедуру"
+        continue_text = "➡️ Продовжити запис"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=add_text,
+                    callback_data="add_another_service",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=continue_text,
+                    callback_data="continue_booking",
+                )
+            ],
+        ]
+    )
