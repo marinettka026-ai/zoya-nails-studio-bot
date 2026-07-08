@@ -747,26 +747,51 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingState.choosing_time)
 
     data = await state.get_data()
-
-    master = await get_master_by_id(data["master_id"])
-    service = await get_service_by_id(data["service_id"])
+    selected_services = data.get("selected_services", [])
 
     language = await get_user_language(callback.from_user.id)
     texts, _ = get_texts_and_buttons(language)
 
     waiting_text = (
-        "⏳ Só um instante...\n" "Estou verificando os horários disponíveis. ✨"
+        "⏳ Só um instante...\nEstou verificando os horários disponíveis. ✨"
         if language == "pt"
-        else "⏳ Одну хвилинку...\n" "Перевіряю вільні годинки для запису. ✨"
+        else "⏳ Одну хвилинку...\nПеревіряю вільні годинки для запису. ✨"
     )
 
     await callback.message.answer(waiting_text)
+
+    first_item = selected_services[0]
+    master = await get_master_by_id(first_item["master_id"])
+    first_service = await get_service_by_id(first_item["service_id"])
+
+    total_duration = 0
+
+    for item in selected_services:
+        service = await get_service_by_id(item["service_id"])
+        total_duration += service["duration"]
+
+        if item.get("extras"):
+            all_extras = await get_service_extras_by_category(
+                master_id=item["master_id"],
+                category_ua=item["category_ua"],
+            )
+
+            selected_extras = [
+                extra for extra in all_extras if extra["id"] in item.get("extras", [])
+            ]
+
+            total_duration += sum(extra["duration"] for extra in selected_extras)
+
+    service_for_time = dict(first_service)
+    service_for_time["duration"] = total_duration
+
+    await state.update_data(total_duration=total_duration)
 
     await callback.message.answer(
         texts["choose_time"],
         reply_markup=await times_keyboard(
             master=master,
-            service=service,
+            service=service_for_time,
             selected_date=selected_date,
             language=language,
         ),
@@ -827,81 +852,103 @@ async def enter_phone_handler(message: Message, state: FSMContext):
     await state.set_state(BookingState.confirming_booking)
 
     data = await state.get_data()
-
     language = await get_user_language(message.from_user.id)
 
-    master = await get_master_by_id(data["master_id"])
-    service = await get_service_by_id(data["service_id"])
+    selected_services = data.get("selected_services", [])
 
-    service_name = (
-        service["name_pt"]
-        if language == "pt" and service["name_pt"]
-        else service["name_ua"]
-    )
+    total_price = 0
+    total_duration = 0
+    services_lines = []
 
-    selected_extra_ids = data.get("selected_extras", [])
+    for index, item in enumerate(selected_services, start=1):
+        master = await get_master_by_id(item["master_id"])
+        service = await get_service_by_id(item["service_id"])
 
-    all_extras = await get_service_extras_by_category(
-        master_id=data["master_id"],
-        category_ua=data["category_ua"],
-    )
+        service_name = (
+            service["name_pt"]
+            if language == "pt" and service["name_pt"]
+            else service["name_ua"]
+        )
 
-    selected_extras = [
-        extra for extra in all_extras if extra["id"] in selected_extra_ids
-    ]
+        extras = []
+        if item.get("extras"):
+            all_extras = await get_service_extras_by_category(
+                master_id=item["master_id"],
+                category_ua=item["category_ua"],
+            )
 
-    extras_price = sum(extra["price"] for extra in selected_extras)
+            extras = [
+                extra for extra in all_extras if extra["id"] in item.get("extras", [])
+            ]
 
-    total_price = service["price"] + extras_price
-    total_duration = service["duration"]
+        extras_price = sum(extra["price"] for extra in extras)
+        extras_duration = sum(extra["duration"] for extra in extras)
+
+        service_total_price = service["price"] + extras_price
+        service_total_duration = service["duration"] + extras_duration
+
+        total_price += service_total_price
+        total_duration += service_total_duration
+
+        if extras:
+            extras_text = "\n".join(
+                [
+                    f"   ➕ {extra['name_pt'] if language == 'pt' and extra['name_pt'] else extra['name_ua']} — {extra['price']}€"
+                    for extra in extras
+                ]
+            )
+        else:
+            extras_text = (
+                "   Sem adicionais" if language == "pt" else "   Без додаткових послуг"
+            )
+
+        if language == "pt":
+            services_lines.append(
+                f"{index}) 👩 Profissional: {master['name']}\n"
+                f"   💅 Serviço: {service_name} — {service['price']}€\n"
+                f"{extras_text}"
+            )
+        else:
+            services_lines.append(
+                f"{index}) 👩 Майстер: {master['name']}\n"
+                f"   💅 Послуга: {service_name} — {service['price']}€\n"
+                f"{extras_text}"
+            )
 
     await state.update_data(
         total_price=total_price,
         total_duration=total_duration,
-        selected_extras=selected_extra_ids,
     )
-
-    if selected_extras:
-        extras_text = "\n".join(
-            [
-                f"➕ {extra['name_pt'] if language == 'pt' and extra['name_pt'] else extra['name_ua']} — {extra['price']}€"
-                for extra in selected_extras
-            ]
-        )
-    else:
-        extras_text = "Sem adicionais" if language == "pt" else "Без додаткових послуг"
 
     hours = total_duration // 60
     minutes = total_duration % 60
 
     if language == "pt":
         duration_text = f"{hours} h {minutes} min" if minutes else f"{hours} h"
+        services_text = "\n\n".join(services_lines)
 
         text = (
             "✅ Verifique os dados da marcação:\n\n"
             f"👤 Nome: {data['client_name']}\n"
             f"📞 Telefone: {data['client_phone']}\n\n"
-            f"👩 Mestre: {master['name']}\n"
-            f"💅 Serviço: {service_name}\n\n"
-            f"➕ Adicionais:\n{extras_text}\n\n"
+            f"💅 Serviços escolhidos:\n{services_text}\n\n"
             f"📅 Data: {data['date']}\n"
             f"🕒 Hora: {data['time']}\n"
-            f"⏳ Duração: {duration_text}\n"
+            f"⏳ Duração total: {duration_text}\n"
             f"💶 Total: {total_price}€"
         )
     else:
         duration_text = f"{hours} год {minutes} хв" if minutes else f"{hours} год"
+        services_text = "\n\n".join(services_lines)
 
         text = (
             "✅ Перевірте дані запису:\n\n"
             f"👤 Імʼя: {data['client_name']}\n"
             f"📞 Телефон: {data['client_phone']}\n\n"
-            f"👩 Майстер: {master['name']}\n"
-            f"💅 Послуга: {service_name}\n\n"
-            f"➕ Додатково:\n{extras_text}\n\n"
+            f"💅 Обрані процедури:\n{services_text}\n\n"
             f"📅 Дата: {data['date']}\n"
             f"🕒 Час: {data['time']}\n"
-            f"⏳ Тривалість: {duration_text}\n"
+            f"⏳ Загальна тривалість: {duration_text}\n"
             f"💶 До оплати: {total_price}€"
         )
 
@@ -920,23 +967,31 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
 
     user = await get_user_by_telegram_id(callback.from_user.id)
 
-    booking_id = await create_booking(
-        client_id=user["id"],
-        master_id=data["master_id"],
-        service_id=data["service_id"],
-        client_name=data["client_name"],
-        client_phone=data["client_phone"],
-        date=data["date"],
-        time=data["time"],
-    )
+    selected_services = data.get("selected_services", [])
+    booking_ids = []
 
-    await update_booking_status(booking_id, "waiting_confirmation")
-    await update_payment_status(booking_id, "not_required")
+    for item in selected_services:
+        booking_id = await create_booking(
+            client_id=user["id"],
+            master_id=item["master_id"],
+            service_id=item["service_id"],
+            client_name=data["client_name"],
+            client_phone=data["client_phone"],
+            date=data["date"],
+            time=data["time"],
+        )
 
-    await notify_master_about_booking(
-        bot=callback.bot,
-        booking_id=booking_id,
-    )
+        await update_booking_status(booking_id, "waiting_confirmation")
+        await update_payment_status(booking_id, "not_required")
+
+        booking_ids.append(booking_id)
+
+        await notify_master_about_booking(
+            bot=callback.bot,
+            booking_id=booking_id,
+        )
+
+    await state.update_data(booking_ids=booking_ids)
 
     await state.set_state(BookingState.waiting_master_confirmation)
 
