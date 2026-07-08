@@ -1,118 +1,118 @@
 TEXTS = {
     "choose_language": "Оберіть мову / Escolha o idioma:",
-    "main_menu": "Головне меню 🌸",
+    "main_menu": "Menu principal 🌸",
     "booking_rules": (
-        "📌 Правила запису\n\n"
-        "Будь ласка, ознайомтесь з умовами перед бронюванням 🌸\n\n"
-        "📅 Зміна або скасування запису\n"
-        "Можливі не пізніше ніж за 24 години до початку візиту.\n\n"
-        "⏰ Запізнення\n"
-        "• більше 15 хвилин — майстер не може гарантувати виконання процедури в повному обсязі;\n"
-        "• 30 хвилин і більше — запис може бути скасований або процедура виконана без покриття;\n"
-        "• після трьох і більше випадків запізнення студія може відмовити в подальшому обслуговуванні.\n\n"
-        "❌ Неявка або скасування в останній момент\n"
-        "У разі неявки або скасування запису менш ніж за 24 години "
-        "стягується 50% вартості процедури. "
-        "Наступний запис можливий після компенсації цієї суми.\n\n"
-        "🌙 Запис у неробочий час\n"
-        "За попереднім погодженням можливий запис на ранній або пізній час "
-        "(07:00–08:00 або 19:00–20:00). "
-        "Вартість такої послуги — +20€."
+        "📌 Regras de marcação\n\n"
+        "Por favor, leia as condições antes de fazer a sua reserva 🌸\n\n"
+        "📅 Alteração ou cancelamento da marcação\n"
+        "Possível até 24 horas antes do início da visita.\n\n"
+        "⏰ Atrasos\n"
+        "• mais de 15 minutos — a mestre não pode garantir a realização completa do serviço;\n"
+        "• 30 minutos ou mais — a marcação pode ser cancelada ou o serviço pode ser feito sem aplicação de verniz/gel;\n"
+        "• após três ou mais atrasos, o estúdio pode recusar futuros atendimentos.\n\n"
+        "❌ Falta de comparência ou cancelamento em cima da hora\n"
+        "Em caso de falta ou cancelamento com menos de 24 horas de antecedência, "
+        "poderá ser cobrado 50% do valor do serviço. "
+        "A próxima marcação só será possível após a compensação desse valor.\n\n"
+        "🌙 Marcações fora do horário de trabalho\n"
+        "Mediante acordo prévio, é possível marcar em horário cedo ou tardio "
+        "(07:00–08:00 ou 19:00–20:00). "
+        "Este serviço tem um custo adicional de +20€."
     ),
-    "choose_master": "👩 Оберіть майстра:",
-    "choose_service": "💅 Оберіть послугу:",
-    "choose_date": "📅 Оберіть зручну дату:",
-    "choose_time": "🕒 Оберіть зручний час:",
-    "enter_name": "👤 Введіть ваше ім’я:",
-    "enter_phone": "📞 Введіть ваш номер телефону:",
+    "choose_master": "👩 Escolha a profissional:",
+    "choose_service": "💅 Escolha o serviço:",
+    "choose_date": "📅 Escolha uma data:",
+    "choose_time": "🕒 Escolha um horário:",
+    "enter_name": "👤 Introduza o seu nome:",
+    "enter_phone": "📞 Introduza o seu número de telefone:",
     "waiting_confirmation": (
-        "Дякуємо 💖\n\n"
-        "Ваш запис очікує підтвердження майстром.\n"
-        "Щойно запис буде підтверджено, ви отримаєте повідомлення."
+        "Obrigada 💖\n\n"
+        "A sua marcação está a aguardar confirmação da profissional.\n"
+        "Assim que for confirmada, receberá uma mensagem."
     ),
     "master_new_booking": (
-        "Новий запис 💅\n\n"
-        "Клієнт: {client_name}\n"
+        "Nova marcação 💅\n\n"
+        "Cliente: {client_name}\n"
         "Telegram: {telegram}\n"
-        "Телефон: {client_phone}\n"
-        "Послуга: {service_name}\n"
-        "Дата: {date}\n"
-        "Час: {time}"
+        "Telefone: {client_phone}\n"
+        "Serviço: {service_name}\n"
+        "Data: {date}\n"
+        "Hora: {time}"
     ),
     "booking_confirmed": (
-        "✅ Ваш запис підтверджено!\n\n"
-        "Майстер: {master_name}\n"
-        "Послуга: {service_name}\n"
-        "Дата: {date}\n"
-        "Час: {time}\n"
-        "Адреса: {address}\n\n"
-        "До зустрічі у ZoYA Nails Studio 🌸"
+        "✅ A sua marcação foi confirmada!\n\n"
+        "Profissional: {master_name}\n"
+        "Serviço: {service_name}\n"
+        "Data: {date}\n"
+        "Hora: {time}\n"
+        "Morada: {address}\n\n"
+        "Até breve no ZoYA Nails Studio 🌸"
     ),
     "booking_rejected": (
-        "На жаль, запис не був підтверджений.\n\n"
-        "Будь ласка, зв’яжіться з майстром або спробуйте обрати інший час."
+        "Infelizmente, a marcação não foi confirmada.\n\n"
+        "Por favor, contacte a profissional ou tente escolher outro horário."
     ),
-    "services": "💅 Наші послуги\n\nТут буде список послуг з описом, ціною та тривалістю.",
-    "masters": "👩 Оберіть майстра, щоб переглянути інформацію:",
+    "services": "💅 Os nossos serviços\n\nAqui estará a lista de serviços com descrição, preço e duração.",
+    "masters": "👩 Escolha a profissional para ver as informações:",
     "master_card": "🌸 {master_name}\n\n{description}",
     "contacts": (
         "📍 ZoYA Nails Studio\n\n"
-        "Адреса:\n"
+        "Morada:\n"
         "Av. 25 de Abril 672, Cascais\n\n"
-        "📞 Телефон:\n"
+        "📞 Telefone:\n"
         "+351 910 886 403\n\n"
         "✉️ Email:\n"
         "zoya.beautyconcept@gmail.com\n\n"
         "📷 Instagram:\n"
         "@zoya_nails_studio\n\n"
-        "Будемо раді бачити вас 🌸"
+        "Será um prazer recebê-la 🌸"
     ),
-    "admin_panel": "Адмін-панель ZoYA Nails Studio\n\nОберіть дію:",
-    "admin_masters": "👩 Управління майстрами:",
-    "admin_services": "💅 Управління послугами:",
-    "admin_bookings": "📅 Управління записами:",
-    "admin_statistics": "📊 Статистика:",
-    "admin_mailing": "📢 Розсилка:",
+    "admin_panel": "Painel administrativo ZoYA Nails Studio\n\nEscolha uma ação:",
+    "admin_masters": "👩 Gestão de profissionais:",
+    "admin_services": "💅 Gestão de serviços:",
+    "admin_bookings": "📅 Gestão de marcações:",
+    "admin_statistics": "📊 Estatísticas:",
+    "admin_mailing": "📢 Mensagem em massa:",
 }
 
 
 BUTTONS = {
     "ua": "🇺🇦 Українська",
     "pt": "🇵🇹 Português",
-    "book": "📅 Записатися",
-    "services": "💅 Послуги",
-    "masters": "👩 Наші майстри",
-    "contacts": "📍 Контакти",
-    "rules_accept": "✅ Ознайомилась / Ознайомився",
-    "back": "⬅️ Назад",
-    "main_menu": "🏠 Головне меню",
-    "confirm": "✅ Все вірно",
-    "change": "🔄 Змінити",
-    "paid": "✅ Підтвердити",
-    "open_map": "🗺 Відкрити на карті",
+    "book": "📅 Marcar",
+    "services": "💅 Serviços",
+    "masters": "👩 Profissionais",
+    "contacts": "📍 Contactos",
+    "rules_accept": "✅ Li e concordo",
+    "back": "⬅️ Voltar",
+    "main_menu": "🏠 Menu principal",
+    "confirm": "✅ Está correto",
+    "change": "🔄 Alterar",
+    "paid": "✅ Confirmar",
+    "open_map": "🗺 Abrir no mapa",
     "instagram": "📷 Instagram",
-    "book_master": "📅 Записатися до майстра",
-    "back_to_masters": "⬅️ Назад до майстрів",
-    "master_confirm_payment": "✅ Підтвердити запис",
-    "master_reject": "❌ Відхилити",
-    "master_contact_client": "💬 Написати клієнту",
-    "admin_masters": "👩 Майстри",
-    "admin_services": "💅 Управління послугами",
-    "admin_bookings": "📅 Записи",
-    "admin_statistics": "📊 Статистика",
-    "admin_mailing": "📢 Розсилка",
-    "admin_clients": "👥 Клієнти",
-    "add_master": "➕ Додати майстра",
-    "edit_master": "✏️ Редагувати майстра",
-    "delete_master": "❌ Видалити майстра",
-    "add_service": "➕ Додати послугу",
-    "edit_service": "✏️ Редагувати послугу",
-    "delete_service": "❌ Видалити послугу",
-    "today": "📅 Сьогодні",
-    "tomorrow": "📅 Завтра",
-    "all_bookings": "📋 Усі записи",
-    "search_booking": "🔍 Пошук запису",
-    "mailing_text": "📝 Написати текст",
-    "mailing_photo": "🖼 Додати фото",
-    "mailing_send": "📢 Надіслати всім клієнтам",
+    "book_master": "📅 Marcar com esta profissional",
+    "back_to_masters": "⬅️ Voltar às profissionais",
+    "master_confirm_payment": "✅ Confirmar marcação",
+    "master_reject": "❌ Recusar",
+    "master_contact_client": "💬 Contactar cliente",
+    "admin_masters": "👩 Profissionais",
+    "admin_services": "💅 Gestão de serviços",
+    "admin_bookings": "📅 Marcações",
+    "admin_statistics": "📊 Estatísticas",
+    "admin_mailing": "📢 Mensagem em massa",
+    "admin_clients": "👥 Clientes",
+    "add_master": "➕ Adicionar profissional",
+    "edit_master": "✏️ Editar profissional",
+    "delete_master": "❌ Remover profissional",
+    "add_service": "➕ Adicionar serviço",
+    "edit_service": "✏️ Editar serviço",
+    "delete_service": "❌ Remover serviço",
+    "today": "📅 Hoje",
+    "tomorrow": "📅 Amanhã",
+    "all_bookings": "📋 Todas as marcações",
+    "search_booking": "🔍 Procurar marcação",
+    "mailing_text": "📝 Escrever texto",
+    "mailing_photo": "🖼 Adicionar foto",
+    "mailing_send": "📢 Enviar a todos os clientes",
 }
