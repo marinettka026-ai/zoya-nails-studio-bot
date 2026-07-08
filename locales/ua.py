@@ -1,4 +1,5 @@
 TEXTS = {
+    "choose_language": "Оберіть мову / Escolha o idioma:",
     "booking_rules": (
         "📌 Правила запису\n\n"
         "Будь ласка, ознайомтесь з умовами перед бронюванням 🌸\n\n"
