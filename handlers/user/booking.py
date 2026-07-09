@@ -313,6 +313,133 @@ def times_overlap(start_1, end_1, start_2, end_2):
     return start_1 < end_2 and start_2 < end_1
 
 
+async def times_keyboard(
+    master,
+    service,
+    selected_services,
+    selected_date: str,
+    language: str = "ua",
+):
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+
+    duration = service["duration"]
+
+    work_start, work_end = get_work_hours_for_date(
+        master["schedule"],
+        selected_date,
+    )
+
+    if not work_start or not work_end:
+        all_times = []
+    else:
+        all_times = generate_time_slots(
+            work_start=work_start,
+            work_end=work_end,
+            duration=duration,
+        )
+
+    busy_bookings = await get_busy_bookings_by_master_and_date(
+        master_id=master["id"],
+        date=selected_date,
+    )
+
+    resource_bookings = await get_bookings_with_resource_by_date(selected_date)
+
+    resource_types = set()
+
+    for item in selected_services:
+        selected_service = await get_service_by_id(item["service_id"])
+        resource_types.add(selected_service["resource_type"])
+
+    keyboard = []
+
+    for time in all_times:
+        slot_start = datetime.strptime(time, "%H:%M")
+        slot_end = slot_start + timedelta(minutes=duration)
+
+        slot_is_busy_in_db = False
+
+        for booking in busy_bookings:
+            busy_start = datetime.strptime(booking["time"], "%H:%M")
+            busy_duration = booking["total_duration"] or service["duration"]
+            busy_end = busy_start + timedelta(minutes=busy_duration)
+
+            if times_overlap(slot_start, slot_end, busy_start, busy_end):
+                slot_is_busy_in_db = True
+                break
+
+        if slot_is_busy_in_db:
+            continue
+
+        resource_is_busy = False
+
+        for resource_type in resource_types:
+            resource_count = 0
+
+            for booking in resource_bookings:
+                if booking["resource_type"] != resource_type:
+                    continue
+
+                busy_start = datetime.strptime(booking["time"], "%H:%M")
+                busy_duration = booking["total_duration"] or booking["service_duration"]
+                busy_end = busy_start + timedelta(minutes=busy_duration)
+
+                if times_overlap(slot_start, slot_end, busy_start, busy_end):
+                    resource_count += 1
+
+            if resource_type == "manicure" and resource_count >= 2:
+                resource_is_busy = True
+                break
+
+            if resource_type == "pedicure" and resource_count >= 1:
+                resource_is_busy = True
+                break
+
+        if resource_is_busy:
+            continue
+
+        if master["calendar_id"]:
+            is_free = is_time_free(
+                calendar_id=master["calendar_id"],
+                date=selected_date,
+                time=time,
+                duration=duration,
+            )
+
+            if not is_free:
+                continue
+
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=time,
+                    callback_data=f"select_time:{time}",
+                )
+            ]
+        )
+
+    if not keyboard:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="❌ Немає вільного часу",
+                    callback_data="no_free_time",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text=buttons["back"],
+                callback_data="back_to_dates",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 @router.callback_query(F.data.startswith("select_date:"))
 async def select_date_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
