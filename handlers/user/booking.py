@@ -17,9 +17,8 @@ from database.queries import (
     get_master_by_id,
     get_services_by_master,
     get_service_by_id,
-    create_combined_booking,
-    build_booking_segments,
-    is_combined_booking_available,
+    create_booking_from_selected_services,
+    is_selected_services_available,
     update_booking_status,
     update_payment_status,
     get_service_categories_by_master,
@@ -320,26 +319,21 @@ async def times_keyboard(
     language: str = "ua",
 ):
     buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-
     total_duration = service["duration"]
 
-    work_start, work_end = get_work_hours_for_date(
-        master["schedule"],
-        selected_date,
-    )
+    work_start, work_end = get_work_hours_for_date(master["schedule"], selected_date)
 
-    if not work_start or not work_end:
-        all_times = []
-    else:
-        all_times = generate_time_slots(
+    all_times = (
+        []
+        if not work_start or not work_end
+        else generate_time_slots(
             work_start=work_start,
             work_end=work_end,
             duration=total_duration,
         )
+    )
 
     keyboard = []
-
-    service_ids = [item["service_id"] for item in selected_services]
 
     for time in all_times:
         slot_start = datetime.strptime(time, "%H:%M")
@@ -349,9 +343,8 @@ async def times_keyboard(
         if slot_end > work_end_time:
             continue
 
-        available = await is_combined_booking_available(
-            master_id=master["id"],
-            service_ids=service_ids,
+        available = await is_selected_services_available(
+            selected_services=selected_services,
             date=selected_date,
             start_time=time,
         )
@@ -950,13 +943,9 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Помилка: послуги не вибрані", show_alert=True)
         return
 
-    service_ids = [item["service_id"] for item in selected_services]
-    main_service = selected_services[0]
-
-    booking_id = await create_combined_booking(
+    booking_id = await create_booking_from_selected_services(
         client_id=user["id"],
-        master_id=main_service["master_id"],
-        service_ids=service_ids,
+        selected_services=selected_services,
         client_name=data["client_name"],
         client_phone=data["client_phone"],
         date=data["date"],
