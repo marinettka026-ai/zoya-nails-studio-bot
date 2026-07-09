@@ -321,6 +321,40 @@ async def get_booking_services(booking_id: int):
         return result
 
 
+async def get_combined_booking_full_info(booking_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                bookings.*,
+
+                users.telegram_id AS client_telegram_id,
+                users.language AS client_language,
+
+                masters.name AS master_name,
+                masters.telegram_id AS master_telegram_id,
+                masters.calendar_id AS master_calendar_id
+            FROM bookings
+            JOIN users ON bookings.client_id = users.id
+            JOIN masters ON bookings.master_id = masters.id
+            WHERE bookings.id = ?
+            """,
+            (booking_id,),
+        )
+
+        booking = await cursor.fetchone()
+
+    if not booking:
+        return None
+
+    booking_data = dict(booking)
+    booking_data["services"] = await get_booking_services(booking_id)
+
+    return booking_data
+
+
 async def get_booking_by_id(booking_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
