@@ -649,6 +649,15 @@ async def extras_skip_handler(callback: CallbackQuery, state: FSMContext):
     current_service = data.get("current_service")
     selected_services = data.get("selected_services", [])
 
+    language = await get_user_language(callback.from_user.id)
+
+    if not current_service:
+        await callback.answer(
+            "Послуга вже додана. Натисніть «Продовжити запис».",
+            show_alert=True,
+        )
+        return
+
     current_service["extras"] = []
     selected_services.append(current_service)
 
@@ -657,8 +666,6 @@ async def extras_skip_handler(callback: CallbackQuery, state: FSMContext):
         current_service=None,
         selected_extras=[],
     )
-
-    language = await get_user_language(callback.from_user.id)
 
     text = (
         "Deseja adicionar outro serviço?"
