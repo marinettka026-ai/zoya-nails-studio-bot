@@ -453,6 +453,10 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     selected_services = data.get("selected_services", [])
 
+    if not selected_services:
+        await callback.answer("Помилка: послуги не вибрані", show_alert=True)
+        return
+
     language = await get_user_language(callback.from_user.id)
     texts, _ = get_texts_and_buttons(language)
 
@@ -490,6 +494,7 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
         reply_markup=await times_keyboard(
             master=master,
             service=service_for_time,
+            selected_services=selected_services,
             selected_date=selected_date,
             language=language,
         ),
