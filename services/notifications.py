@@ -45,7 +45,7 @@ async def notify_master_about_booking(bot: Bot, booking_id: int):
     for index, service in enumerate(booking["services"], start=1):
         services_text += (
             f"{index}. {service['name_ua']} — "
-            f"{service['price']} zł, {service['duration']} хв\n"
+            f"{service['price']} €, {service['duration']} хв\n"
         )
 
         extras = service.get("extras", [])
@@ -54,7 +54,7 @@ async def notify_master_about_booking(bot: Bot, booking_id: int):
             for extra in extras:
                 services_text += (
                     f"   ➕ {extra.get('name_ua', 'Додатково')} — "
-                    f"{extra.get('price', 0)} zł, "
+                    f"{extra.get('price', 0)} €, "
                     f"{extra.get('duration', 0)} хв\n"
                 )
 
@@ -66,7 +66,7 @@ async def notify_master_about_booking(bot: Bot, booking_id: int):
         f"📅 Дата: {booking['date']}\n"
         f"🕒 Час: {booking['time']}\n"
         f"⏱ Загальна тривалість: {booking['total_duration']} хв\n"
-        f"💰 Загальна сума: {booking['total_price']} zł\n\n"
+        f"💰 Загальна сума: {booking['total_price']} €\n\n"
         f"Статус: очікує підтвердження майстром"
     )
 

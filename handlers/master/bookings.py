@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from database.queries import (
     get_booking_full_info,
+    get_combined_booking_full_info,
     update_booking_status,
     update_payment_status,
 )
@@ -30,7 +31,7 @@ def telegram_user_link_keyboard(telegram_id: int, button_text: str):
 async def master_confirm_payment(callback: CallbackQuery):
     booking_id = int(callback.data.split(":")[1])
 
-    booking = await get_booking_full_info(booking_id)
+    booking = await get_combined_booking_full_info(booking_id)
 
     if not booking:
         await callback.answer("Запис не знайдено", show_alert=True)
@@ -44,23 +45,34 @@ async def master_confirm_payment(callback: CallbackQuery):
         await callback.answer("Цей запис уже скасовано ❌", show_alert=True)
         return
 
-    service_name = (
-        booking["name_pt"]
-        if booking["client_language"] == "pt" and booking["name_pt"]
-        else booking["name_ua"]
-    )
+    services = booking.get("services", [])
 
-    if booking["calendar_id"]:
-        print("CALENDAR_ID =", booking["calendar_id"])
+    if not services:
+        await callback.answer("У записі немає процедур", show_alert=True)
+        return
+
+    if booking["client_language"] == "pt":
+        service_names = [
+            service["name_pt"] if service["name_pt"] else service["name_ua"]
+            for service in services
+        ]
+    else:
+        service_names = [service["name_ua"] for service in services]
+
+    services_text = "\n".join(f"• {name}" for name in service_names)
+    calendar_service_name = " + ".join(service_names)
+
+    if booking["master_calendar_id"]:
+        print("CALENDAR_ID =", booking["master_calendar_id"])
         print("DATE =", booking["date"])
         print("TIME =", booking["time"])
-        print("DURATION =", booking["duration"])
+        print("DURATION =", booking["total_duration"])
 
         is_free = is_time_free(
-            calendar_id=booking["calendar_id"],
+            calendar_id=booking["master_calendar_id"],
             date=booking["date"],
             time=booking["time"],
-            duration=booking["duration"],
+            duration=booking["total_duration"],
         )
 
         print("IS FREE =", is_free)
@@ -73,14 +85,14 @@ async def master_confirm_payment(callback: CallbackQuery):
             return
 
         event = create_calendar_event(
-            calendar_id=booking["calendar_id"],
+            calendar_id=booking["master_calendar_id"],
             client_name=booking["client_name"],
             client_phone=booking["client_phone"],
-            service_name=service_name,
+            service_name=calendar_service_name,
             master_name=booking["master_name"],
             date=booking["date"],
             time=booking["time"],
-            duration=booking["duration"],
+            duration=booking["total_duration"],
         )
 
         print("GOOGLE EVENT CREATED:", event.get("id"))
@@ -95,7 +107,7 @@ async def master_confirm_payment(callback: CallbackQuery):
         client_text = (
             "✅ A sua marcação foi confirmada!\n\n"
             f"Profissional: {booking['master_name']}\n"
-            f"Serviço: {service_name}\n"
+            f"Serviços:\n{services_text}\n"
             f"Data: {booking['date']}\n"
             f"Hora: {booking['time']}\n"
             f"Morada: {SALON_ADDRESS}\n\n"
@@ -105,7 +117,7 @@ async def master_confirm_payment(callback: CallbackQuery):
         client_text = (
             "✅ Ваш запис підтверджено!\n\n"
             f"Майстер: {booking['master_name']}\n"
-            f"Послуга: {service_name}\n"
+            f"Процедури:\n{services_text}\n"
             f"Дата: {booking['date']}\n"
             f"Час: {booking['time']}\n"
             f"Адреса: {SALON_ADDRESS}\n\n"
