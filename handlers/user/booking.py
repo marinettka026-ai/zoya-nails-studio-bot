@@ -313,135 +313,62 @@ def times_overlap(start_1, end_1, start_2, end_2):
     return start_1 < end_2 and start_2 < end_1
 
 
-async def times_keyboard(
-    master,
-    service,
-    selected_date: str,
-    language: str = "ua",
-):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+@router.callback_query(F.data.startswith("select_date:"))
+async def select_date_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
 
-    duration = service["duration"]
-    resource_type = service["resource_type"]
+    selected_date = callback.data.split(":")[1]
 
-    work_start, work_end = get_work_hours_for_date(
-        master["schedule"],
-        selected_date,
+    await state.update_data(date=selected_date)
+    await state.set_state(BookingState.choosing_time)
+
+    data = await state.get_data()
+    selected_services = data.get("selected_services", [])
+
+    language = await get_user_language(callback.from_user.id)
+    texts, _ = get_texts_and_buttons(language)
+
+    waiting_text = (
+        "⏳ Só um instante...\nEstou verificando os horários disponíveis. ✨"
+        if language == "pt"
+        else "⏳ Одну хвилинку...\nПеревіряю вільні годинки для запису. ✨"
     )
 
-    if not work_start or not work_end:
-        all_times = []
-    else:
-        all_times = generate_time_slots(
-            work_start=work_start,
-            work_end=work_end,
-            duration=duration,
-        )
+    await callback.message.answer(waiting_text)
 
-    busy_bookings = await get_busy_bookings_by_master_and_date(
-        master_id=master["id"],
-        date=selected_date,
+    first_item = selected_services[0]
+
+    master = await get_master_by_id(first_item["master_id"])
+    first_service = await get_service_by_id(first_item["service_id"])
+
+    total_duration = 0
+
+    for item in selected_services:
+        service = await get_service_by_id(item["service_id"])
+        total_duration += service["duration"]
+
+        if item.get("extras"):
+            total_duration += sum(
+                extra.get("duration", 0) for extra in item.get("extras", [])
+            )
+
+    service_for_time = dict(first_service)
+    service_for_time["duration"] = total_duration
+
+    await state.update_data(total_duration=total_duration)
+
+    await callback.message.answer(
+        texts["choose_time"],
+        reply_markup=await times_keyboard(
+            master=master,
+            service=service_for_time,
+            selected_date=selected_date,
+            language=language,
+        ),
     )
 
-    resource_bookings = await get_bookings_with_resource_by_date(selected_date)
-
-    keyboard = []
-
-    for time in all_times:
-        slot_start = datetime.strptime(time, "%H:%M")
-        slot_end = slot_start + timedelta(minutes=duration)
-
-        slot_is_busy_in_db = False
-
-        for booking in busy_bookings:
-            busy_start = datetime.strptime(booking["time"], "%H:%M")
-
-            busy_duration = booking["total_duration"] or service["duration"]
-            busy_end = busy_start + timedelta(minutes=busy_duration)
-
-            if times_overlap(slot_start, slot_end, busy_start, busy_end):
-                slot_is_busy_in_db = True
-                print(
-                    f"DB MASTER BUSY {selected_date} {time} "
-                    f"| busy={booking['time']} duration={busy_duration}"
-                )
-                break
-
-        if slot_is_busy_in_db:
-            continue
-
-        resource_count = 0
-
-        for booking in resource_bookings:
-            if booking["resource_type"] != resource_type:
-                continue
-
-            busy_start = datetime.strptime(booking["time"], "%H:%M")
-            busy_duration = booking["total_duration"] or booking["service_duration"]
-            busy_end = busy_start + timedelta(minutes=busy_duration)
-
-            if times_overlap(slot_start, slot_end, busy_start, busy_end):
-                resource_count += 1
-
-        if resource_type == "manicure" and resource_count >= 2:
-            print(
-                f"RESOURCE BUSY manicure {selected_date} {time} "
-                f"| count={resource_count}"
-            )
-            continue
-
-        if resource_type == "pedicure" and resource_count >= 1:
-            print(
-                f"RESOURCE BUSY pedicure {selected_date} {time} "
-                f"| count={resource_count}"
-            )
-            continue
-
-        if master["calendar_id"]:
-            is_free = is_time_free(
-                calendar_id=master["calendar_id"],
-                date=selected_date,
-                time=time,
-                duration=duration,
-            )
-
-            print(
-                f"GOOGLE CHECK {selected_date} {time} "
-                f"| duration={duration} | free={is_free}"
-            )
-
-            if not is_free:
-                continue
-
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=time,
-                    callback_data=f"select_time:{time}",
-                )
-            ]
-        )
-
-    if not keyboard:
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text="❌ Немає вільного часу",
-                    callback_data="no_free_time",
-                )
-            ]
-        )
-
-    keyboard.append(
-        [
-            InlineKeyboardButton(
-                text=buttons["back"],
-                callback_data="back_to_dates",
-            )
-        ]
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    await callback.answer()
 
 
 @router.message(F.text.in_(["📅 Записатися", "📅 Marcar"]))
@@ -790,16 +717,9 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
         total_duration += service["duration"]
 
         if item.get("extras"):
-            all_extras = await get_service_extras_by_category(
-                master_id=item["master_id"],
-                category_ua=item["category_ua"],
+            total_duration += sum(
+                extra.get("duration", 0) for extra in item.get("extras", [])
             )
-
-            selected_extras = [
-                extra for extra in all_extras if extra["id"] in item.get("extras", [])
-            ]
-
-            total_duration += sum(extra["duration"] for extra in selected_extras)
 
     service_for_time = dict(first_service)
     service_for_time["duration"] = total_duration
@@ -811,6 +731,7 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
         reply_markup=await times_keyboard(
             master=master,
             service=service_for_time,
+            selected_services=selected_services,
             selected_date=selected_date,
             language=language,
         ),
