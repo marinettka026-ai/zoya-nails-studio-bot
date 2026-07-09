@@ -4,8 +4,16 @@ import aiosqlite
 DB_NAME = os.getenv("DB_NAME", "salon_booking.db")
 
 
+async def add_column(db, table, column_sql):
+    try:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
+    except Exception:
+        pass
+
+
 async def create_tables():
     async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
 
         await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -36,6 +44,17 @@ async def create_tables():
             calendar_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS salon_resources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            resource_type TEXT UNIQUE NOT NULL,
+            name_ua TEXT NOT NULL,
+            name_pt TEXT,
+            capacity INTEGER NOT NULL DEFAULT 1,
+            is_active INTEGER DEFAULT 1
         )
         """)
 
@@ -81,16 +100,19 @@ async def create_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id INTEGER NOT NULL,
             master_id INTEGER NOT NULL,
-            service_id INTEGER NOT NULL,
+            service_id INTEGER,
             client_name TEXT,
             client_phone TEXT,
             date TEXT NOT NULL,
             time TEXT NOT NULL,
+            end_time TEXT,
             total_price REAL DEFAULT 0,
             total_duration INTEGER DEFAULT 0,
             selected_extras TEXT,
+            comment TEXT,
             status TEXT DEFAULT 'waiting_confirmation',
             payment_status TEXT DEFAULT 'not_required',
+            calendar_event_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (client_id) REFERENCES users (id),
             FOREIGN KEY (master_id) REFERENCES masters (id),
@@ -104,11 +126,15 @@ async def create_tables():
             booking_id INTEGER NOT NULL,
             master_id INTEGER NOT NULL,
             service_id INTEGER NOT NULL,
+            date TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            resource_type TEXT,
             extras TEXT,
             position INTEGER DEFAULT 1,
             price REAL DEFAULT 0,
             duration INTEGER DEFAULT 0,
-            FOREIGN KEY (booking_id) REFERENCES bookings (id),
+            FOREIGN KEY (booking_id) REFERENCES bookings (id) ON DELETE CASCADE,
             FOREIGN KEY (master_id) REFERENCES masters (id),
             FOREIGN KEY (service_id) REFERENCES services (id)
         )
@@ -122,91 +148,66 @@ async def create_tables():
             status TEXT DEFAULT 'pending',
             method TEXT DEFAULT 'manual',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (booking_id) REFERENCES bookings (id)
+            FOREIGN KEY (booking_id) REFERENCES bookings (id) ON DELETE CASCADE
         )
         """)
 
-        # Міграції старої бази
-        try:
-            await db.execute("ALTER TABLE services ADD COLUMN category_ua TEXT")
-        except:
-            pass
+        # Ресурси студії
+        await db.execute("""
+        INSERT OR IGNORE INTO salon_resources 
+        (resource_type, name_ua, name_pt, capacity)
+        VALUES 
+        ('manicure', 'Манікюрне місце', 'Lugar de manicure', 2),
+        ('pedicure', 'Педикюрне крісло', 'Lugar de pedicure', 1)
+        """)
 
-        try:
-            await db.execute("ALTER TABLE services ADD COLUMN category_pt TEXT")
-        except:
-            pass
+        # Міграції
+        await add_column(db, "services", "category_ua TEXT")
+        await add_column(db, "services", "category_pt TEXT")
+        await add_column(db, "services", "service_type TEXT DEFAULT 'main'")
+        await add_column(db, "services", "deposit_amount REAL DEFAULT 0")
+        await add_column(db, "services", "resource_type TEXT DEFAULT 'manicure'")
 
-        try:
-            await db.execute(
-                "ALTER TABLE services ADD COLUMN service_type TEXT DEFAULT 'main'"
-            )
-        except:
-            pass
+        await add_column(db, "masters", "calendar_id TEXT")
 
-        try:
-            await db.execute(
-                "ALTER TABLE services ADD COLUMN resource_type TEXT DEFAULT 'manicure'"
-            )
-        except:
-            pass
+        await add_column(db, "users", "is_blocked INTEGER DEFAULT 0")
+        await add_column(db, "users", "note TEXT")
 
-        try:
-            await db.execute("ALTER TABLE masters ADD COLUMN calendar_id TEXT")
-        except:
-            pass
+        await add_column(db, "bookings", "end_time TEXT")
+        await add_column(db, "bookings", "total_price REAL DEFAULT 0")
+        await add_column(db, "bookings", "total_duration INTEGER DEFAULT 0")
+        await add_column(db, "bookings", "selected_extras TEXT")
+        await add_column(db, "bookings", "comment TEXT")
+        await add_column(db, "bookings", "payment_status TEXT DEFAULT 'not_required'")
+        await add_column(db, "bookings", "calendar_event_id TEXT")
 
-        try:
-            await db.execute(
-                "ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0"
-            )
-        except:
-            pass
+        await add_column(db, "booking_services", "date TEXT")
+        await add_column(db, "booking_services", "start_time TEXT")
+        await add_column(db, "booking_services", "end_time TEXT")
+        await add_column(db, "booking_services", "resource_type TEXT")
+        await add_column(db, "booking_services", "extras TEXT")
+        await add_column(db, "booking_services", "position INTEGER DEFAULT 1")
+        await add_column(db, "booking_services", "price REAL DEFAULT 0")
+        await add_column(db, "booking_services", "duration INTEGER DEFAULT 0")
 
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN note TEXT")
-        except:
-            pass
+        await add_column(db, "service_extras", "master_id INTEGER")
+        await add_column(db, "service_extras", "category_ua TEXT")
+        await add_column(db, "service_extras", "category_pt TEXT")
 
-        try:
-            await db.execute(
-                "ALTER TABLE bookings ADD COLUMN total_price REAL DEFAULT 0"
-            )
-        except:
-            pass
+        # Індекси для швидкої перевірки зайнятості
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_booking_services_resource_time
+        ON booking_services (date, resource_type, start_time, end_time)
+        """)
 
-        try:
-            await db.execute(
-                "ALTER TABLE bookings ADD COLUMN total_duration INTEGER DEFAULT 0"
-            )
-        except:
-            pass
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_booking_services_master_time
+        ON booking_services (master_id, date, start_time, end_time)
+        """)
 
-        try:
-            await db.execute("ALTER TABLE bookings ADD COLUMN selected_extras TEXT")
-        except:
-            pass
-
-        try:
-            await db.execute(
-                "ALTER TABLE bookings ADD COLUMN payment_status TEXT DEFAULT 'not_required'"
-            )
-        except:
-            pass
-
-        try:
-            await db.execute("ALTER TABLE service_extras ADD COLUMN master_id INTEGER")
-        except:
-            pass
-
-        try:
-            await db.execute("ALTER TABLE service_extras ADD COLUMN category_ua TEXT")
-        except:
-            pass
-
-        try:
-            await db.execute("ALTER TABLE service_extras ADD COLUMN category_pt TEXT")
-        except:
-            pass
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_bookings_status
+        ON bookings (status)
+        """)
 
         await db.commit()

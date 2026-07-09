@@ -17,16 +17,15 @@ from database.queries import (
     get_master_by_id,
     get_services_by_master,
     get_service_by_id,
-    create_booking,
-    add_booking_service,
+    create_combined_booking,
+    build_booking_segments,
+    is_combined_booking_available,
     update_booking_status,
     update_payment_status,
     get_service_categories_by_master,
     get_services_by_master_and_category,
-    get_busy_bookings_by_master_and_date,
     get_service_extras,
     get_service_extras_by_category,
-    get_bookings_with_resource_by_date,
     get_extra_by_id,
 )
 
@@ -322,7 +321,7 @@ async def times_keyboard(
 ):
     buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
 
-    duration = service["duration"]
+    total_duration = service["duration"]
 
     work_start, work_end = get_work_hours_for_date(
         master["schedule"],
@@ -335,67 +334,29 @@ async def times_keyboard(
         all_times = generate_time_slots(
             work_start=work_start,
             work_end=work_end,
-            duration=duration,
+            duration=total_duration,
         )
-
-    busy_bookings = await get_busy_bookings_by_master_and_date(
-        master_id=master["id"],
-        date=selected_date,
-    )
-
-    resource_bookings = await get_bookings_with_resource_by_date(selected_date)
-
-    resource_types = set()
-
-    for item in selected_services:
-        selected_service = await get_service_by_id(item["service_id"])
-        resource_types.add(selected_service["resource_type"])
 
     keyboard = []
 
+    service_ids = [item["service_id"] for item in selected_services]
+
     for time in all_times:
         slot_start = datetime.strptime(time, "%H:%M")
-        slot_end = slot_start + timedelta(minutes=duration)
+        slot_end = slot_start + timedelta(minutes=total_duration)
+        work_end_time = datetime.strptime(work_end, "%H:%M")
 
-        slot_is_busy_in_db = False
-
-        for booking in busy_bookings:
-            busy_start = datetime.strptime(booking["time"], "%H:%M")
-            busy_duration = booking["total_duration"] or service["duration"]
-            busy_end = busy_start + timedelta(minutes=busy_duration)
-
-            if times_overlap(slot_start, slot_end, busy_start, busy_end):
-                slot_is_busy_in_db = True
-                break
-
-        if slot_is_busy_in_db:
+        if slot_end > work_end_time:
             continue
 
-        resource_is_busy = False
+        available = await is_combined_booking_available(
+            master_id=master["id"],
+            service_ids=service_ids,
+            date=selected_date,
+            start_time=time,
+        )
 
-        for resource_type in resource_types:
-            resource_count = 0
-
-            for booking in resource_bookings:
-                if booking["resource_type"] != resource_type:
-                    continue
-
-                busy_start = datetime.strptime(booking["time"], "%H:%M")
-                busy_duration = booking["total_duration"] or booking["service_duration"]
-                busy_end = busy_start + timedelta(minutes=busy_duration)
-
-                if times_overlap(slot_start, slot_end, busy_start, busy_end):
-                    resource_count += 1
-
-            if resource_type == "manicure" and resource_count >= 2:
-                resource_is_busy = True
-                break
-
-            if resource_type == "pedicure" and resource_count >= 1:
-                resource_is_busy = True
-                break
-
-        if resource_is_busy:
+        if not available:
             continue
 
         if master["calendar_id"]:
@@ -403,7 +364,7 @@ async def times_keyboard(
                 calendar_id=master["calendar_id"],
                 date=selected_date,
                 time=time,
-                duration=duration,
+                duration=total_duration,
             )
 
             if not is_free:
@@ -438,69 +399,6 @@ async def times_keyboard(
     )
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-@router.callback_query(F.data.startswith("select_date:"))
-async def select_date_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    selected_date = callback.data.split(":")[1]
-
-    await state.update_data(date=selected_date)
-    await state.set_state(BookingState.choosing_time)
-
-    data = await state.get_data()
-    selected_services = data.get("selected_services", [])
-
-    if not selected_services:
-        await callback.answer("Помилка: послуги не вибрані", show_alert=True)
-        return
-
-    language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    waiting_text = (
-        "⏳ Só um instante...\nEstou verificando os horários disponíveis. ✨"
-        if language == "pt"
-        else "⏳ Одну хвилинку...\nПеревіряю вільні годинки для запису. ✨"
-    )
-
-    await callback.message.answer(waiting_text)
-
-    first_item = selected_services[0]
-
-    master = await get_master_by_id(first_item["master_id"])
-    first_service = await get_service_by_id(first_item["service_id"])
-
-    total_duration = 0
-
-    for item in selected_services:
-        service = await get_service_by_id(item["service_id"])
-        total_duration += service["duration"]
-
-        if item.get("extras"):
-            total_duration += sum(
-                extra.get("duration", 0) for extra in item.get("extras", [])
-            )
-
-    service_for_time = dict(first_service)
-    service_for_time["duration"] = total_duration
-
-    await state.update_data(total_duration=total_duration)
-
-    await callback.message.answer(
-        texts["choose_time"],
-        reply_markup=await times_keyboard(
-            master=master,
-            service=service_for_time,
-            selected_services=selected_services,
-            selected_date=selected_date,
-            language=language,
-        ),
-    )
-
-    await callback.answer()
 
 
 @router.message(F.text.in_(["📅 Записатися", "📅 Marcar"]))
@@ -1045,52 +943,26 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Помилка: послуги не вибрані", show_alert=True)
         return
 
-    total_price = 0
-    total_duration = 0
-
-    for item in selected_services:
-        total_price += item.get("price", 0)
-        total_duration += item.get("duration", 0)
-
-        for extra in item.get("extras", []):
-            total_price += extra.get("price", 0)
-            total_duration += extra.get("duration", 0)
-
+    service_ids = [item["service_id"] for item in selected_services]
     main_service = selected_services[0]
 
-    booking_id = await create_booking(
+    booking_id = await create_combined_booking(
         client_id=user["id"],
         master_id=main_service["master_id"],
-        service_id=main_service["service_id"],
+        service_ids=service_ids,
         client_name=data["client_name"],
         client_phone=data["client_phone"],
         date=data["date"],
-        time=data["time"],
-        total_price=total_price,
-        total_duration=total_duration,
-        selected_extras=[],
+        start_time=data["time"],
+        comment=data.get("comment"),
     )
 
-    for index, item in enumerate(selected_services, start=1):
-        service_price = item.get("price", 0)
-        service_duration = item.get("duration", 0)
-
-        for extra in item.get("extras", []):
-            service_price += extra.get("price", 0)
-            service_duration += extra.get("duration", 0)
-
-        await add_booking_service(
-            booking_id=booking_id,
-            master_id=item["master_id"],
-            service_id=item["service_id"],
-            extras=item.get("extras", []),
-            position=index,
-            price=service_price,
-            duration=service_duration,
+    if not booking_id:
+        await callback.answer(
+            "На жаль, цей час вже зайнятий. Оберіть інший час.",
+            show_alert=True,
         )
-
-    await update_booking_status(booking_id, "waiting_confirmation")
-    await update_payment_status(booking_id, "not_required")
+        return
 
     await notify_master_about_booking(
         bot=callback.bot,

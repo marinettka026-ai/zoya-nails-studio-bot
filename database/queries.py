@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timedelta
+
 import aiosqlite
 from database.database import DB_NAME
 
@@ -245,6 +247,11 @@ async def create_booking(
         return cursor.lastrowid
 
 
+def add_minutes(time_str: str, minutes: int) -> str:
+    time_obj = datetime.strptime(time_str, "%H:%M")
+    return (time_obj + timedelta(minutes=minutes)).strftime("%H:%M")
+
+
 async def add_booking_service(
     booking_id: int,
     master_id: int,
@@ -253,6 +260,10 @@ async def add_booking_service(
     position: int = 1,
     price: float = 0,
     duration: int = 0,
+    date: str = None,
+    start_time: str = None,
+    end_time: str = None,
+    resource_type: str = None,
 ):
     extras_json = json.dumps(extras or [], ensure_ascii=False)
 
@@ -266,9 +277,13 @@ async def add_booking_service(
                 extras,
                 position,
                 price,
-                duration
+                duration,
+                date,
+                start_time,
+                end_time,
+                resource_type
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 booking_id,
@@ -278,8 +293,13 @@ async def add_booking_service(
                 position,
                 price,
                 duration,
+                date,
+                start_time,
+                end_time,
+                resource_type,
             ),
         )
+
         await db.commit()
 
 
@@ -1012,3 +1032,257 @@ async def get_bookings_with_resource_by_date(date: str):
         )
 
         return await cursor.fetchall()
+
+
+async def get_resource_capacity(resource_type: str) -> int:
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            SELECT capacity
+            FROM salon_resources
+            WHERE resource_type = ?
+            AND is_active = 1
+            """,
+            (resource_type,),
+        )
+
+        row = await cursor.fetchone()
+        return row[0] if row else 1
+
+
+async def is_master_available(
+    master_id: int,
+    date: str,
+    start_time: str,
+    end_time: str,
+) -> bool:
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+            FROM booking_services bs
+            JOIN bookings b ON b.id = bs.booking_id
+            WHERE bs.master_id = ?
+            AND bs.date = ?
+            AND b.status NOT IN ('cancelled', 'rejected')
+            AND bs.start_time < ?
+            AND bs.end_time > ?
+            """,
+            (master_id, date, end_time, start_time),
+        )
+
+        count = (await cursor.fetchone())[0]
+        return count == 0
+
+
+async def is_resource_available(
+    resource_type: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+) -> bool:
+    capacity = await get_resource_capacity(resource_type)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+            FROM booking_services bs
+            JOIN bookings b ON b.id = bs.booking_id
+            WHERE bs.resource_type = ?
+            AND bs.date = ?
+            AND b.status NOT IN ('cancelled', 'rejected')
+            AND bs.start_time < ?
+            AND bs.end_time > ?
+            """,
+            (resource_type, date, end_time, start_time),
+        )
+
+        busy_count = (await cursor.fetchone())[0]
+        return busy_count < capacity
+
+
+async def build_booking_segments(
+    master_id: int,
+    service_ids: list[int],
+    date: str,
+    start_time: str,
+):
+    segments = []
+    current_time = start_time
+
+    for position, service_id in enumerate(service_ids, start=1):
+        service = await get_service_by_id(service_id)
+
+        if not service:
+            return None
+
+        duration = int(service["duration"])
+        end_time = add_minutes(current_time, duration)
+
+        segments.append(
+            {
+                "master_id": master_id,
+                "service_id": service_id,
+                "date": date,
+                "start_time": current_time,
+                "end_time": end_time,
+                "resource_type": service["resource_type"],
+                "price": float(service["price"]),
+                "duration": duration,
+                "position": position,
+            }
+        )
+
+        current_time = end_time
+
+    return segments
+
+
+async def is_combined_booking_available(
+    master_id: int,
+    service_ids: list[int],
+    date: str,
+    start_time: str,
+) -> bool:
+    segments = await build_booking_segments(
+        master_id=master_id,
+        service_ids=service_ids,
+        date=date,
+        start_time=start_time,
+    )
+
+    if not segments:
+        return False
+
+    for segment in segments:
+        master_free = await is_master_available(
+            master_id=segment["master_id"],
+            date=segment["date"],
+            start_time=segment["start_time"],
+            end_time=segment["end_time"],
+        )
+
+        if not master_free:
+            return False
+
+        resource_free = await is_resource_available(
+            resource_type=segment["resource_type"],
+            date=segment["date"],
+            start_time=segment["start_time"],
+            end_time=segment["end_time"],
+        )
+
+        if not resource_free:
+            return False
+
+    return True
+
+
+async def create_combined_booking(
+    client_id: int,
+    master_id: int,
+    service_ids: list[int],
+    client_name: str,
+    client_phone: str,
+    date: str,
+    start_time: str,
+    comment: str = None,
+):
+    segments = await build_booking_segments(
+        master_id=master_id,
+        service_ids=service_ids,
+        date=date,
+        start_time=start_time,
+    )
+
+    if not segments:
+        return None
+
+    available = await is_combined_booking_available(
+        master_id=master_id,
+        service_ids=service_ids,
+        date=date,
+        start_time=start_time,
+    )
+
+    if not available:
+        return None
+
+    total_price = sum(segment["price"] for segment in segments)
+    total_duration = sum(segment["duration"] for segment in segments)
+    end_time = segments[-1]["end_time"]
+    first_service_id = service_ids[0]
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO bookings (
+                client_id,
+                master_id,
+                service_id,
+                client_name,
+                client_phone,
+                date,
+                time,
+                end_time,
+                total_price,
+                total_duration,
+                comment,
+                status,
+                payment_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id,
+                master_id,
+                first_service_id,
+                client_name,
+                client_phone,
+                date,
+                start_time,
+                end_time,
+                total_price,
+                total_duration,
+                comment,
+                "waiting_confirmation",
+                "not_required",
+            ),
+        )
+
+        booking_id = cursor.lastrowid
+
+        for segment in segments:
+            await db.execute(
+                """
+                INSERT INTO booking_services (
+                    booking_id,
+                    master_id,
+                    service_id,
+                    date,
+                    start_time,
+                    end_time,
+                    resource_type,
+                    position,
+                    price,
+                    duration
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    booking_id,
+                    segment["master_id"],
+                    segment["service_id"],
+                    segment["date"],
+                    segment["start_time"],
+                    segment["end_time"],
+                    segment["resource_type"],
+                    segment["position"],
+                    segment["price"],
+                    segment["duration"],
+                ),
+            )
+
+        await db.commit()
+        return booking_id
