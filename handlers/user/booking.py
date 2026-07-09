@@ -8,7 +8,7 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 from aiogram.fsm.context import FSMContext
-from services.calendar import is_time_free
+from services.calendar import is_time_free, create_calendar_event
 
 from database.queries import (
     get_user_by_telegram_id,
@@ -19,6 +19,7 @@ from database.queries import (
     get_service_by_id,
     create_booking_from_selected_services,
     is_selected_services_available,
+    build_booking_segments_from_items,
     update_booking_status,
     update_payment_status,
     get_service_categories_by_master,
@@ -352,6 +353,8 @@ async def times_keyboard(
         if not available:
             continue
 
+        # Перевірка Google Calendar тільки першого майстра
+        # Ресурси та інші майстри перевіряються через is_selected_services_available()
         if master["calendar_id"]:
             is_free = is_time_free(
                 calendar_id=master["calendar_id"],
@@ -960,42 +963,43 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
         )
         return
 
+    # ===== Створення окремих подій у Google Calendar для кожної процедури =====
+    try:
+        segments = await build_booking_segments_from_items(
+            selected_services=selected_services,
+            date=data["date"],
+            start_time=data["time"],
+        )
+
+        if segments:
+            for segment in segments:
+                master = await get_master_by_id(segment["master_id"])
+                service = await get_service_by_id(segment["service_id"])
+
+                if not master or not master["calendar_id"]:
+                    continue
+
+                create_calendar_event(
+                    calendar_id=master["calendar_id"],
+                    client_name=data["client_name"],
+                    client_phone=data["client_phone"],
+                    service_name=service["name_ua"],
+                    master_name=master["name"],
+                    date=segment["date"],
+                    time=segment["start_time"],
+                    duration=segment["duration"],
+                )
+
+    except Exception as e:
+        print(f"Google Calendar error: {e}")
+
+    # ===== Повідомлення майстру =====
     await notify_master_about_booking(
         bot=callback.bot,
         booking_id=booking_id,
     )
 
     await state.update_data(booking_id=booking_id)
-
-    await state.set_state(BookingState.waiting_master_confirmation)
-
-    await callback.message.answer(
-        texts["waiting_confirmation"],
-        reply_markup=main_menu(language),
-    )
-
-    await callback.answer()
-
-
-@router.callback_query(F.data == "deposit_paid")
-async def deposit_paid_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    data = await state.get_data()
-    booking_id = data.get("booking_id")
-
-    if booking_id:
-        await update_booking_status(booking_id, "waiting_confirmation")
-        await update_payment_status(booking_id, "waiting_confirmation")
-
-        await notify_master_about_booking(
-            bot=callback.bot,
-            booking_id=booking_id,
-        )
 
     await state.set_state(BookingState.waiting_master_confirmation)
 
