@@ -4,10 +4,15 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from database.queries import (
     get_booking_full_info,
     get_combined_booking_full_info,
+    get_master_by_id,
     update_booking_status,
     update_payment_status,
 )
-from services.calendar import is_time_free, create_calendar_event
+
+from services.calendar import (
+    is_time_free,
+    create_calendar_event,
+)
 
 router = Router()
 
@@ -60,45 +65,66 @@ async def master_confirm_payment(callback: CallbackQuery):
         service_names = [service["name_ua"] for service in services]
 
     services_text = "\n".join(f"• {name}" for name in service_names)
-    calendar_service_name = " + ".join(service_names)
 
-    if booking["master_calendar_id"]:
-        print("CALENDAR_ID =", booking["master_calendar_id"])
-        print("DATE =", booking["date"])
-        print("TIME =", booking["time"])
-        print("DURATION =", booking["total_duration"])
+    # ===== Перевірка Google Calendar для кожної процедури =====
+    calendar_events_to_create = []
 
-        is_free = is_time_free(
-            calendar_id=booking["master_calendar_id"],
-            date=booking["date"],
-            time=booking["time"],
-            duration=booking["total_duration"],
-        )
+    try:
+        for service_item in services:
+            master = await get_master_by_id(service_item["master_id"])
 
-        print("IS FREE =", is_free)
+            if not master or not master["calendar_id"]:
+                continue
 
-        if not is_free:
-            await callback.answer(
-                "❌ Цей час уже зайнятий у Google Calendar.",
-                show_alert=True,
+            service_name = (
+                service_item["name_pt"]
+                if booking["client_language"] == "pt" and service_item["name_pt"]
+                else service_item["name_ua"]
             )
-            return
 
-        event = create_calendar_event(
-            calendar_id=booking["master_calendar_id"],
-            client_name=booking["client_name"],
-            client_phone=booking["client_phone"],
-            service_name=calendar_service_name,
-            master_name=booking["master_name"],
-            date=booking["date"],
-            time=booking["time"],
-            duration=booking["total_duration"],
+            event_date = service_item["date"] or booking["date"]
+            event_time = service_item["start_time"] or booking["time"]
+            event_duration = service_item["duration"] or booking["total_duration"]
+
+            is_free = is_time_free(
+                calendar_id=master["calendar_id"],
+                date=event_date,
+                time=event_time,
+                duration=event_duration,
+            )
+
+            if not is_free:
+                await callback.answer(
+                    f"❌ Час для процедури «{service_name}» уже зайнятий у Google Calendar.",
+                    show_alert=True,
+                )
+                return
+
+            calendar_events_to_create.append(
+                {
+                    "calendar_id": master["calendar_id"],
+                    "client_name": booking["client_name"],
+                    "client_phone": booking["client_phone"],
+                    "service_name": service_name,
+                    "master_name": master["name"],
+                    "date": event_date,
+                    "time": event_time,
+                    "duration": event_duration,
+                }
+            )
+
+        # ===== Створення подій після успішної перевірки =====
+        for event_data in calendar_events_to_create:
+            event = create_calendar_event(**event_data)
+            print("GOOGLE EVENT CREATED:", event.get("id"))
+
+    except Exception as e:
+        print(f"Google Calendar error: {e}")
+        await callback.answer(
+            "❌ Не вдалося створити подію в Google Calendar.",
+            show_alert=True,
         )
-
-        print("GOOGLE EVENT CREATED:", event.get("id"))
-
-    else:
-        print("NO CALENDAR ID")
+        return
 
     await update_booking_status(booking_id, "confirmed")
     await update_payment_status(booking_id, "paid")

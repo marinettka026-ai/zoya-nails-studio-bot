@@ -963,44 +963,12 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
         )
         return
 
-    # ===== Створення окремих подій у Google Calendar для кожної процедури =====
-    try:
-        segments = await build_booking_segments_from_items(
-            selected_services=selected_services,
-            date=data["date"],
-            start_time=data["time"],
-        )
-
-        if segments:
-            for segment in segments:
-                master = await get_master_by_id(segment["master_id"])
-                service = await get_service_by_id(segment["service_id"])
-
-                if not master or not master["calendar_id"]:
-                    continue
-
-                create_calendar_event(
-                    calendar_id=master["calendar_id"],
-                    client_name=data["client_name"],
-                    client_phone=data["client_phone"],
-                    service_name=service["name_ua"],
-                    master_name=master["name"],
-                    date=segment["date"],
-                    time=segment["start_time"],
-                    duration=segment["duration"],
-                )
-
-    except Exception as e:
-        print(f"Google Calendar error: {e}")
-
-    # ===== Повідомлення майстру =====
     await notify_master_about_booking(
         bot=callback.bot,
         booking_id=booking_id,
     )
 
     await state.update_data(booking_id=booking_id)
-
     await state.set_state(BookingState.waiting_master_confirmation)
 
     await callback.message.answer(
