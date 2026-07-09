@@ -18,6 +18,7 @@ from database.queries import (
     get_services_by_master,
     get_service_by_id,
     create_booking,
+    add_booking_service,
     update_booking_status,
     update_payment_status,
     get_service_categories_by_master,
@@ -26,6 +27,7 @@ from database.queries import (
     get_service_extras,
     get_service_extras_by_category,
     get_bookings_with_resource_by_date,
+    get_extra_by_id,
 )
 
 from services.notifications import notify_master_about_booking
@@ -570,13 +572,16 @@ async def select_service_handler(callback: CallbackQuery, state: FSMContext):
     service_id = int(callback.data.split(":")[1])
 
     data = await state.get_data()
-
     selected_services = data.get("selected_services", [])
+
+    service = await get_service_by_id(service_id)
 
     current_service = {
         "master_id": data["master_id"],
         "service_id": service_id,
         "category_ua": data["category_ua"],
+        "price": service["price"],
+        "duration": service["duration"],
         "extras": [],
     }
 
@@ -639,7 +644,21 @@ async def toggle_extra_handler(callback: CallbackQuery, state: FSMContext):
     current_service = data.get("current_service")
     selected_services = data.get("selected_services", [])
 
-    current_service["extras"] = [extra_id]
+    extra = await get_extra_by_id(extra_id)
+
+    if extra:
+        current_service["extras"] = [
+            {
+                "id": extra["id"],
+                "name_ua": extra["name_ua"],
+                "name_pt": extra["name_pt"],
+                "price": extra["price"],
+                "duration": extra["duration"],
+            }
+        ]
+    else:
+        current_service["extras"] = []
+
     selected_services.append(current_service)
 
     await state.update_data(
@@ -968,30 +987,64 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
     user = await get_user_by_telegram_id(callback.from_user.id)
 
     selected_services = data.get("selected_services", [])
-    booking_ids = []
+
+    if not selected_services:
+        await callback.answer("Помилка: послуги не вибрані", show_alert=True)
+        return
+
+    total_price = 0
+    total_duration = 0
 
     for item in selected_services:
-        booking_id = await create_booking(
-            client_id=user["id"],
+        total_price += item.get("price", 0)
+        total_duration += item.get("duration", 0)
+
+        for extra in item.get("extras", []):
+            total_price += extra.get("price", 0)
+            total_duration += extra.get("duration", 0)
+
+    main_service = selected_services[0]
+
+    booking_id = await create_booking(
+        client_id=user["id"],
+        master_id=main_service["master_id"],
+        service_id=main_service["service_id"],
+        client_name=data["client_name"],
+        client_phone=data["client_phone"],
+        date=data["date"],
+        time=data["time"],
+        total_price=total_price,
+        total_duration=total_duration,
+        selected_extras=[],
+    )
+
+    for index, item in enumerate(selected_services, start=1):
+        service_price = item.get("price", 0)
+        service_duration = item.get("duration", 0)
+
+        for extra in item.get("extras", []):
+            service_price += extra.get("price", 0)
+            service_duration += extra.get("duration", 0)
+
+        await add_booking_service(
+            booking_id=booking_id,
             master_id=item["master_id"],
             service_id=item["service_id"],
-            client_name=data["client_name"],
-            client_phone=data["client_phone"],
-            date=data["date"],
-            time=data["time"],
+            extras=item.get("extras", []),
+            position=index,
+            price=service_price,
+            duration=service_duration,
         )
 
-        await update_booking_status(booking_id, "waiting_confirmation")
-        await update_payment_status(booking_id, "not_required")
+    await update_booking_status(booking_id, "waiting_confirmation")
+    await update_payment_status(booking_id, "not_required")
 
-        booking_ids.append(booking_id)
+    await notify_master_about_booking(
+        bot=callback.bot,
+        booking_id=booking_id,
+    )
 
-        await notify_master_about_booking(
-            bot=callback.bot,
-            booking_id=booking_id,
-        )
-
-    await state.update_data(booking_ids=booking_ids)
+    await state.update_data(booking_id=booking_id)
 
     await state.set_state(BookingState.waiting_master_confirmation)
 

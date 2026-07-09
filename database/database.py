@@ -60,7 +60,7 @@ async def create_tables():
         """)
 
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS service_extras (
+        CREATE TABLE IF NOT EXISTS service_extras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             service_id INTEGER,
             master_id INTEGER,
@@ -93,6 +93,22 @@ async def create_tables():
             payment_status TEXT DEFAULT 'not_required',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (client_id) REFERENCES users (id),
+            FOREIGN KEY (master_id) REFERENCES masters (id),
+            FOREIGN KEY (service_id) REFERENCES services (id)
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS booking_services (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            booking_id INTEGER NOT NULL,
+            master_id INTEGER NOT NULL,
+            service_id INTEGER NOT NULL,
+            extras TEXT,
+            position INTEGER DEFAULT 1,
+            price REAL DEFAULT 0,
+            duration INTEGER DEFAULT 0,
+            FOREIGN KEY (booking_id) REFERENCES bookings (id),
             FOREIGN KEY (master_id) REFERENCES masters (id),
             FOREIGN KEY (service_id) REFERENCES services (id)
         )

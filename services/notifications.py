@@ -1,7 +1,9 @@
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from database.queries import get_booking_full_info
+from database.queries import (
+    get_combined_booking_full_info,
+)
 
 
 def master_confirmation_keyboard(booking_id: int):
@@ -9,7 +11,7 @@ def master_confirmation_keyboard(booking_id: int):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Підтвердити оплату",
+                    text="✅ Підтвердити запис",
                     callback_data=f"master_confirm:{booking_id}",
                 )
             ],
@@ -30,7 +32,7 @@ def master_confirmation_keyboard(booking_id: int):
 
 
 async def notify_master_about_booking(bot: Bot, booking_id: int):
-    booking = await get_booking_full_info(booking_id)
+    booking = await get_combined_booking_full_info(booking_id)
 
     if not booking:
         return False
@@ -38,14 +40,34 @@ async def notify_master_about_booking(bot: Bot, booking_id: int):
     if not booking["master_telegram_id"]:
         return False
 
+    services_text = ""
+
+    for index, service in enumerate(booking["services"], start=1):
+        services_text += (
+            f"{index}. {service['name_ua']} — "
+            f"{service['price']} zł, {service['duration']} хв\n"
+        )
+
+        extras = service.get("extras", [])
+
+        if extras:
+            for extra in extras:
+                services_text += (
+                    f"   ➕ {extra.get('name_ua', 'Додатково')} — "
+                    f"{extra.get('price', 0)} zł, "
+                    f"{extra.get('duration', 0)} хв\n"
+                )
+
     text = (
         "💅 Новий запис очікує підтвердження\n\n"
         f"👤 Клієнт: {booking['client_name']}\n"
-        f"📞 Телефон: {booking['client_phone']}\n"
-        f"💅 Послуга: {booking['name_ua']}\n"
+        f"📞 Телефон: {booking['client_phone']}\n\n"
+        f"💅 Процедури:\n{services_text}\n"
         f"📅 Дата: {booking['date']}\n"
         f"🕒 Час: {booking['time']}\n"
-        f"💳 Завдаток: очікує перевірки"
+        f"⏱ Загальна тривалість: {booking['total_duration']} хв\n"
+        f"💰 Загальна сума: {booking['total_price']} zł\n\n"
+        f"Статус: очікує підтвердження майстром"
     )
 
     await bot.send_message(

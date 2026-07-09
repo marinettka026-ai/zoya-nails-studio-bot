@@ -1,3 +1,4 @@
+import json
 import aiosqlite
 from database.database import DB_NAME
 
@@ -204,19 +205,120 @@ async def create_booking(
     client_phone: str,
     date: str,
     time: str,
+    total_price: float = 0,
+    total_duration: int = 0,
+    selected_extras=None,
 ):
+    selected_extras_json = json.dumps(selected_extras or [], ensure_ascii=False)
+
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute(
             """
-        INSERT INTO bookings (
-            client_id, master_id, service_id, client_name, client_phone, date, time
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (client_id, master_id, service_id, client_name, client_phone, date, time),
+            INSERT INTO bookings (
+                client_id,
+                master_id,
+                service_id,
+                client_name,
+                client_phone,
+                date,
+                time,
+                total_price,
+                total_duration,
+                selected_extras
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id,
+                master_id,
+                service_id,
+                client_name,
+                client_phone,
+                date,
+                time,
+                total_price,
+                total_duration,
+                selected_extras_json,
+            ),
         )
         await db.commit()
         return cursor.lastrowid
+
+
+async def add_booking_service(
+    booking_id: int,
+    master_id: int,
+    service_id: int,
+    extras=None,
+    position: int = 1,
+    price: float = 0,
+    duration: int = 0,
+):
+    extras_json = json.dumps(extras or [], ensure_ascii=False)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO booking_services (
+                booking_id,
+                master_id,
+                service_id,
+                extras,
+                position,
+                price,
+                duration
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                booking_id,
+                master_id,
+                service_id,
+                extras_json,
+                position,
+                price,
+                duration,
+            ),
+        )
+        await db.commit()
+
+
+async def get_booking_services(booking_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                booking_services.*,
+                services.name_ua,
+                services.name_pt,
+                services.category_ua,
+                services.category_pt,
+                masters.name AS master_name
+            FROM booking_services
+            JOIN services ON booking_services.service_id = services.id
+            JOIN masters ON booking_services.master_id = masters.id
+            WHERE booking_services.booking_id = ?
+            ORDER BY booking_services.position ASC
+            """,
+            (booking_id,),
+        )
+
+        rows = await cursor.fetchall()
+
+        result = []
+        for row in rows:
+            item = dict(row)
+
+            try:
+                item["extras"] = json.loads(item["extras"] or "[]")
+            except json.JSONDecodeError:
+                item["extras"] = []
+
+            result.append(item)
+
+        return result
 
 
 async def get_booking_by_id(booking_id: int):
