@@ -1288,50 +1288,65 @@ async def create_combined_booking(
         return booking_id
 
 
-async def build_booking_segments_from_items(
-    selected_services: list[dict],
+async def is_resource_available(
+    resource_type: str,
     date: str,
     start_time: str,
-):
-    segments = []
-    current_time = start_time
+    end_time: str,
+) -> bool:
+    capacity = await get_resource_capacity(resource_type)
 
-    for position, item in enumerate(selected_services, start=1):
-        service = await get_service_by_id(item["service_id"])
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
 
-        if not service:
-            return None
-
-        service_duration = int(service["duration"])
-        service_price = float(service["price"])
-
-        extras = item.get("extras", [])
-        extras_duration = sum(int(extra.get("duration", 0)) for extra in extras)
-        extras_price = sum(float(extra.get("price", 0)) for extra in extras)
-
-        duration = service_duration + extras_duration
-        price = service_price + extras_price
-
-        end_time = add_minutes(current_time, duration)
-
-        segments.append(
-            {
-                "master_id": item["master_id"],
-                "service_id": item["service_id"],
-                "date": date,
-                "start_time": current_time,
-                "end_time": end_time,
-                "resource_type": service["resource_type"],
-                "price": price,
-                "duration": duration,
-                "position": position,
-                "extras": extras,
-            }
+        cursor = await db.execute(
+            """
+            SELECT
+                bs.id,
+                bs.booking_id,
+                bs.master_id,
+                bs.service_id,
+                bs.date,
+                bs.start_time,
+                bs.end_time,
+                bs.resource_type,
+                b.status
+            FROM booking_services bs
+            JOIN bookings b ON b.id = bs.booking_id
+            WHERE bs.resource_type = ?
+              AND bs.date = ?
+              AND b.status NOT IN ('cancelled', 'rejected')
+              AND bs.start_time < ?
+              AND bs.end_time > ?
+            """,
+            (
+                resource_type,
+                date,
+                end_time,
+                start_time,
+            ),
         )
 
-        current_time = end_time
+        busy_rows = await cursor.fetchall()
+        busy_count = len(busy_rows)
 
-    return segments
+        print("========== RESOURCE CHECK ==========")
+        print("RESOURCE:", resource_type)
+        print("DATE:", date)
+        print("REQUESTED:", start_time, "-", end_time)
+        print("CAPACITY:", capacity)
+        print("BUSY COUNT:", busy_count)
+
+        for row in busy_rows:
+            print(
+                "FOUND:",
+                dict(row),
+            )
+
+        print("AVAILABLE:", busy_count < capacity)
+        print("====================================")
+
+        return busy_count < capacity
 
 
 async def is_selected_services_available(
