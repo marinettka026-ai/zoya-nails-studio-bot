@@ -1349,6 +1349,54 @@ async def is_resource_available(
         return busy_count < capacity
 
 
+async def build_booking_segments_from_items(
+    selected_services: list[dict],
+    date: str,
+    start_time: str,
+):
+    segments = []
+    current_time = start_time
+
+    for position, item in enumerate(selected_services, start=1):
+        service = await get_service_by_id(item["service_id"])
+
+        if not service:
+            return None
+
+        service_duration = int(service["duration"])
+        service_price = float(service["price"])
+
+        extras = item.get("extras", [])
+
+        extras_duration = sum(int(extra.get("duration", 0)) for extra in extras)
+
+        extras_price = sum(float(extra.get("price", 0)) for extra in extras)
+
+        duration = service_duration + extras_duration
+        price = service_price + extras_price
+
+        end_time = add_minutes(current_time, duration)
+
+        segments.append(
+            {
+                "master_id": item["master_id"],
+                "service_id": item["service_id"],
+                "date": date,
+                "start_time": current_time,
+                "end_time": end_time,
+                "resource_type": service["resource_type"],
+                "price": price,
+                "duration": duration,
+                "position": position,
+                "extras": extras,
+            }
+        )
+
+        current_time = end_time
+
+    return segments
+
+
 async def is_selected_services_available(
     selected_services: list[dict],
     date: str,
