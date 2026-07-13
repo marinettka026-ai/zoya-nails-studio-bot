@@ -1088,22 +1088,55 @@ async def is_resource_available(
     capacity = await get_resource_capacity(resource_type)
 
     async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
         cursor = await db.execute(
             """
-            SELECT COUNT(*)
+            SELECT
+                bs.booking_id,
+                bs.master_id,
+                bs.service_id,
+                bs.date,
+                bs.start_time,
+                bs.end_time,
+                bs.resource_type,
+                b.status
             FROM booking_services bs
             JOIN bookings b ON b.id = bs.booking_id
             WHERE bs.resource_type = ?
-            AND bs.date = ?
-            AND b.status NOT IN ('cancelled', 'rejected')
-            AND bs.start_time < ?
-            AND bs.end_time > ?
+              AND bs.date = ?
+              AND b.status NOT IN ('cancelled', 'rejected')
+              AND bs.start_time < ?
+              AND bs.end_time > ?
             """,
-            (resource_type, date, end_time, start_time),
+            (
+                resource_type,
+                date,
+                end_time,
+                start_time,
+            ),
         )
 
-        busy_count = (await cursor.fetchone())[0]
-        return busy_count < capacity
+        busy_rows = await cursor.fetchall()
+        busy_count = len(busy_rows)
+
+        print("========== RESOURCE DEBUG ==========")
+        print("DB:", DB_NAME)
+        print("REQUEST RESOURCE:", resource_type)
+        print("REQUEST DATE:", date)
+        print("REQUEST TIME:", start_time, "-", end_time)
+        print("CAPACITY:", capacity)
+        print("FOUND COUNT:", busy_count)
+
+        for row in busy_rows:
+            print("FOUND BOOKING:", dict(row))
+
+        available = busy_count < capacity
+
+        print("AVAILABLE:", available)
+        print("====================================")
+
+        return available
 
 
 async def build_booking_segments(
