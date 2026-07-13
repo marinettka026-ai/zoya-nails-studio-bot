@@ -140,6 +140,7 @@ async def add_service(
     description_pt: str = None,
     category_ua: str = None,
     category_pt: str = None,
+    resource_type: str = "manicure",
 ):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
@@ -154,9 +155,10 @@ async def add_service(
                 description_pt,
                 price,
                 duration,
-                deposit_amount
+                deposit_amount,
+                resource_type
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 master_id,
@@ -169,8 +171,10 @@ async def add_service(
                 price,
                 duration,
                 deposit_amount,
+                resource_type,
             ),
         )
+
         await db.commit()
 
 
