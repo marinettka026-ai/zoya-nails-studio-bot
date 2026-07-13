@@ -320,19 +320,21 @@ async def times_keyboard(
     language: str = "ua",
 ):
     buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-    total_duration = service["duration"]
+    total_duration = int(service["duration"])
 
-    work_start, work_end = get_work_hours_for_date(master["schedule"], selected_date)
+    work_start, work_end = get_work_hours_for_date(
+        master["schedule"],
+        selected_date,
+    )
 
-    all_times = (
-        []
-        if not work_start or not work_end
-        else generate_time_slots(
+    if not work_start or not work_end:
+        all_times = []
+    else:
+        all_times = generate_time_slots(
             work_start=work_start,
             work_end=work_end,
             duration=total_duration,
         )
-    )
 
     keyboard = []
 
@@ -341,30 +343,59 @@ async def times_keyboard(
         slot_end = slot_start + timedelta(minutes=total_duration)
         work_end_time = datetime.strptime(work_end, "%H:%M")
 
+        # Процедура повинна повністю поміщатися в робочий день
         if slot_end > work_end_time:
             continue
 
+        # Перевіряємо майстра та ресурси студії через БД
         available = await is_selected_services_available(
             selected_services=selected_services,
             date=selected_date,
             start_time=time,
         )
 
+        print("========== SLOT CHECK ==========")
+        print("MASTER:", master["name"])
+        print("DATE:", selected_date)
+        print("TIME:", time)
+        print("SLOT END:", slot_end.strftime("%H:%M"))
+        print("TOTAL DURATION:", total_duration)
+        print("SELECTED SERVICES:", selected_services)
+        print("DB AVAILABLE:", available)
+        print("CALENDAR ID:", master["calendar_id"])
+
         if not available:
+            print("RESULT: BLOCKED BY DATABASE")
+            print("================================")
             continue
 
-        # Перевірка Google Calendar тільки першого майстра
-        # Ресурси та інші майстри перевіряються через is_selected_services_available()
+        # Перевіряємо особистий Google Calendar обраного майстра
         if master["calendar_id"]:
-            is_free = is_time_free(
-                calendar_id=master["calendar_id"],
-                date=selected_date,
-                time=time,
-                duration=total_duration,
-            )
+            try:
+                calendar_free = is_time_free(
+                    calendar_id=master["calendar_id"],
+                    date=selected_date,
+                    time=time,
+                    duration=total_duration,
+                )
 
-            if not is_free:
+                print("GOOGLE CALENDAR FREE:", calendar_free)
+
+                if not calendar_free:
+                    print("RESULT: BLOCKED BY GOOGLE CALENDAR")
+                    print("================================")
+                    continue
+
+            except Exception as error:
+                print("GOOGLE CALENDAR CHECK ERROR:", repr(error))
+                print("RESULT: BLOCKED BECAUSE CALENDAR CHECK FAILED")
+                print("================================")
                 continue
+        else:
+            print("GOOGLE CALENDAR: NO CALENDAR ID")
+
+        print("RESULT: SLOT IS AVAILABLE")
+        print("================================")
 
         keyboard.append(
             [
