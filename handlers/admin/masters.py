@@ -28,12 +28,14 @@ def admin_masters_keyboard():
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=UA_BUTTONS["add_master"], callback_data="admin_add_master"
+                    text=UA_BUTTONS["add_master"],
+                    callback_data="admin_add_master",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=UA_BUTTONS["edit_master"], callback_data="admin_edit_master"
+                    text=UA_BUTTONS["edit_master"],
+                    callback_data="admin_edit_master",
                 )
             ],
             [
@@ -42,7 +44,12 @@ def admin_masters_keyboard():
                     callback_data="admin_delete_master",
                 )
             ],
-            [InlineKeyboardButton(text=UA_BUTTONS["back"], callback_data="admin_back")],
+            [
+                InlineKeyboardButton(
+                    text=UA_BUTTONS["back"],
+                    callback_data="admin_back",
+                )
+            ],
         ]
     )
 
@@ -52,6 +59,7 @@ def masters_choose_keyboard(masters, action: str):
 
     for master in masters:
         status = "✅" if master["is_active"] else "🚫"
+
         keyboard.append(
             [
                 InlineKeyboardButton(
@@ -62,8 +70,14 @@ def masters_choose_keyboard(masters, action: str):
         )
 
     keyboard.append(
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_admin_masters")]
+        [
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data="back_admin_masters",
+            )
+        ]
     )
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -111,6 +125,7 @@ async def back_admin_masters(callback: CallbackQuery, state: FSMContext):
         "👩 Управління майстрами\n\n" f"Список майстрів:\n{masters_text}",
         reply_markup=admin_masters_keyboard(),
     )
+
     await callback.answer()
 
 
@@ -120,13 +135,17 @@ async def back_admin_masters(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "admin_add_master")
 async def start_add_master(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ Немає доступу", show_alert=True)
+        await callback.answer(
+            "⛔ Немає доступу",
+            show_alert=True,
+        )
         return
 
     await state.clear()
     await state.set_state(AddMasterState.name)
 
     await callback.message.answer("➕ Додавання майстра\n\n" "Введіть ім’я майстра:")
+
     await callback.answer()
 
 
@@ -146,8 +165,13 @@ async def add_master_photo(message: Message, state: FSMContext):
 
     if message.photo:
         photo_id = message.photo[-1].file_id
-    elif message.text and message.text.lower() in ["пропустити", "skip"]:
+
+    elif message.text and message.text.lower() in [
+        "пропустити",
+        "skip",
+    ]:
         photo_id = None
+
     else:
         await message.answer("Надішліть фото або напишіть: пропустити")
         return
@@ -159,17 +183,33 @@ async def add_master_photo(message: Message, state: FSMContext):
 
 
 @router.message(AddMasterState.description_ua)
-async def add_master_description_ua(message: Message, state: FSMContext):
-    await state.update_data(description_ua=message.text)
-    await state.set_state(AddMasterState.description_pt)
+async def add_master_description_ua(
+    message: Message,
+    state: FSMContext,
+):
+    await state.update_data(
+        description_ua=message.text,
+    )
+
+    await state.set_state(
+        AddMasterState.description_pt,
+    )
 
     await message.answer("🇵🇹 Введіть опис майстра португальською:")
 
 
 @router.message(AddMasterState.description_pt)
-async def add_master_description_pt(message: Message, state: FSMContext):
-    await state.update_data(description_pt=message.text)
-    await state.set_state(AddMasterState.telegram_id)
+async def add_master_description_pt(
+    message: Message,
+    state: FSMContext,
+):
+    await state.update_data(
+        description_pt=message.text,
+    )
+
+    await state.set_state(
+        AddMasterState.telegram_id,
+    )
 
     await message.answer(
         "🆔 Введіть Telegram ID майстра.\n\n" "Якщо поки немає — напишіть: пропустити"
@@ -177,18 +217,33 @@ async def add_master_description_pt(message: Message, state: FSMContext):
 
 
 @router.message(AddMasterState.telegram_id)
-async def add_master_telegram_id(message: Message, state: FSMContext):
-    if message.text.lower() in ["пропустити", "skip"]:
+async def add_master_telegram_id(
+    message: Message,
+    state: FSMContext,
+):
+    if message.text.lower() in [
+        "пропустити",
+        "skip",
+    ]:
         telegram_id = None
+
     else:
         try:
             telegram_id = int(message.text)
+
         except ValueError:
-            await message.answer("Telegram ID має бути числом або напишіть: пропустити")
+            await message.answer(
+                "Telegram ID має бути числом " "або напишіть: пропустити"
+            )
             return
 
-    await state.update_data(telegram_id=telegram_id)
-    await state.set_state(AddMasterState.schedule)
+    await state.update_data(
+        telegram_id=telegram_id,
+    )
+
+    await state.set_state(
+        AddMasterState.schedule,
+    )
 
     await message.answer(
         "🕒 Введіть графік роботи майстра.\n\n"
@@ -204,9 +259,17 @@ async def add_master_telegram_id(message: Message, state: FSMContext):
 
 
 @router.message(AddMasterState.schedule)
-async def add_master_schedule(message: Message, state: FSMContext):
-    await state.update_data(schedule=message.text)
-    await state.set_state(AddMasterState.calendar_id)
+async def add_master_schedule(
+    message: Message,
+    state: FSMContext,
+):
+    await state.update_data(
+        schedule=message.text,
+    )
+
+    await state.set_state(
+        AddMasterState.calendar_id,
+    )
 
     await message.answer(
         "📅 Введіть Google Calendar ID майстра.\n\n"
@@ -217,13 +280,23 @@ async def add_master_schedule(message: Message, state: FSMContext):
 
 
 @router.message(AddMasterState.calendar_id)
-async def add_master_calendar_id(message: Message, state: FSMContext):
-    if message.text.lower() in ["пропустити", "skip"]:
+async def add_master_calendar_id(
+    message: Message,
+    state: FSMContext,
+):
+    if message.text.lower() in [
+        "пропустити",
+        "skip",
+    ]:
         calendar_id = None
+
     else:
         calendar_id = message.text.strip()
 
-    await state.update_data(calendar_id=calendar_id)
+    await state.update_data(
+        calendar_id=calendar_id,
+    )
+
     data = await state.get_data()
 
     await add_master(
@@ -241,7 +314,8 @@ async def add_master_calendar_id(message: Message, state: FSMContext):
     await message.answer(
         "✅ Майстра успішно додано!\n\n"
         f"Ім’я: {data['name']}\n"
-        f"Calendar ID: {data['calendar_id'] or 'Не вказано'}",
+        f"Calendar ID: "
+        f"{data['calendar_id'] or 'Не вказано'}",
         reply_markup=admin_menu(),
     )
 
@@ -250,51 +324,82 @@ async def add_master_calendar_id(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "admin_edit_master")
-async def choose_master_to_edit(callback: CallbackQuery):
+async def choose_master_to_edit(
+    callback: CallbackQuery,
+):
     masters = await get_all_masters()
 
     if not masters:
         await callback.message.answer("Поки що немає майстрів для редагування.")
+
         await callback.answer()
         return
 
     await callback.message.answer(
         "✏️ Оберіть майстра для редагування:",
-        reply_markup=masters_choose_keyboard(masters, "edit_master"),
+        reply_markup=masters_choose_keyboard(
+            masters,
+            "edit_master",
+        ),
     )
+
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("edit_master:"))
-async def start_edit_master(callback: CallbackQuery, state: FSMContext):
+async def start_edit_master(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
     master_id = int(callback.data.split(":")[1])
+
     master = await get_master_by_id(master_id)
 
     if not master:
-        await callback.answer("Майстра не знайдено", show_alert=True)
+        await callback.answer(
+            "Майстра не знайдено",
+            show_alert=True,
+        )
         return
 
     await state.clear()
-    await state.update_data(master_id=master_id)
-    await state.set_state(EditMasterState.name)
+
+    await state.update_data(
+        master_id=master_id,
+    )
+
+    await state.set_state(
+        EditMasterState.name,
+    )
 
     await callback.message.answer(
         "✏️ Редагування майстра\n\n"
         f"Поточне ім’я: {master['name']}\n\n"
-        "Введіть нове ім’я або напишіть: залишити"
+        "Введіть нове ім’я "
+        "або напишіть: залишити"
     )
+
     await callback.answer()
 
 
 @router.message(EditMasterState.name)
-async def edit_master_name(message: Message, state: FSMContext):
+async def edit_master_name(
+    message: Message,
+    state: FSMContext,
+):
     data = await state.get_data()
+
     master = await get_master_by_id(data["master_id"])
 
     name = master["name"] if message.text.lower() == "залишити" else message.text
 
-    await state.update_data(name=name)
-    await state.set_state(EditMasterState.photo)
+    await state.update_data(
+        name=name,
+    )
+
+    await state.set_state(
+        EditMasterState.photo,
+    )
 
     await message.answer(
         "📸 Надішліть нове фото.\n\n"
@@ -305,52 +410,84 @@ async def edit_master_name(message: Message, state: FSMContext):
 
 
 @router.message(EditMasterState.photo)
-async def edit_master_photo(message: Message, state: FSMContext):
+async def edit_master_photo(
+    message: Message,
+    state: FSMContext,
+):
     data = await state.get_data()
+
     master = await get_master_by_id(data["master_id"])
 
     if message.photo:
         photo_id = message.photo[-1].file_id
+
     elif message.text and message.text.lower() == "залишити":
         photo_id = master["photo_id"]
+
     elif message.text and message.text.lower() in ["пропустити", "skip"]:
         photo_id = None
+
     else:
-        await message.answer("Надішліть фото або напишіть: залишити / пропустити")
+        await message.answer("Надішліть фото або напишіть: " "залишити / пропустити")
         return
 
-    await state.update_data(photo_id=photo_id)
-    await state.set_state(EditMasterState.description_ua)
+    await state.update_data(
+        photo_id=photo_id,
+    )
 
-    await message.answer("🇺🇦 Введіть новий опис українською або напишіть: залишити")
+    await state.set_state(
+        EditMasterState.description_ua,
+    )
+
+    await message.answer("🇺🇦 Введіть новий опис українською " "або напишіть: залишити")
 
 
 @router.message(EditMasterState.description_ua)
-async def edit_master_description_ua(message: Message, state: FSMContext):
+async def edit_master_description_ua(
+    message: Message,
+    state: FSMContext,
+):
     data = await state.get_data()
+
     master = await get_master_by_id(data["master_id"])
 
     description_ua = (
         master["description_ua"] if message.text.lower() == "залишити" else message.text
     )
 
-    await state.update_data(description_ua=description_ua)
-    await state.set_state(EditMasterState.description_pt)
+    await state.update_data(
+        description_ua=description_ua,
+    )
 
-    await message.answer("🇵🇹 Введіть новий опис португальською або напишіть: залишити")
+    await state.set_state(
+        EditMasterState.description_pt,
+    )
+
+    await message.answer(
+        "🇵🇹 Введіть новий опис португальською " "або напишіть: залишити"
+    )
 
 
 @router.message(EditMasterState.description_pt)
-async def edit_master_description_pt(message: Message, state: FSMContext):
+async def edit_master_description_pt(
+    message: Message,
+    state: FSMContext,
+):
     data = await state.get_data()
+
     master = await get_master_by_id(data["master_id"])
 
     description_pt = (
         master["description_pt"] if message.text.lower() == "залишити" else message.text
     )
 
-    await state.update_data(description_pt=description_pt)
-    await state.set_state(EditMasterState.telegram_id)
+    await state.update_data(
+        description_pt=description_pt,
+    )
+
+    await state.set_state(
+        EditMasterState.telegram_id,
+    )
 
     await message.answer(
         "🆔 Введіть новий Telegram ID.\n\n"
@@ -361,25 +498,40 @@ async def edit_master_description_pt(message: Message, state: FSMContext):
 
 
 @router.message(EditMasterState.telegram_id)
-async def edit_master_telegram_id(message: Message, state: FSMContext):
+async def edit_master_telegram_id(
+    message: Message,
+    state: FSMContext,
+):
     data = await state.get_data()
+
     master = await get_master_by_id(data["master_id"])
 
     if message.text.lower() == "залишити":
         telegram_id = master["telegram_id"]
-    elif message.text.lower() in ["пропустити", "skip"]:
+
+    elif message.text.lower() in [
+        "пропустити",
+        "skip",
+    ]:
         telegram_id = None
+
     else:
         try:
             telegram_id = int(message.text)
+
         except ValueError:
             await message.answer(
-                "Telegram ID має бути числом або напишіть: залишити / пропустити"
+                "Telegram ID має бути числом " "або напишіть: " "залишити / пропустити"
             )
             return
 
-    await state.update_data(telegram_id=telegram_id)
-    await state.set_state(EditMasterState.schedule)
+    await state.update_data(
+        telegram_id=telegram_id,
+    )
+
+    await state.set_state(
+        EditMasterState.schedule,
+    )
 
     await message.answer(
         "🕒 Введіть графік роботи.\n\n"
@@ -396,13 +548,58 @@ async def edit_master_telegram_id(message: Message, state: FSMContext):
 
 
 @router.message(EditMasterState.schedule)
-async def edit_master_schedule(message: Message, state: FSMContext):
+async def edit_master_schedule(
+    message: Message,
+    state: FSMContext,
+):
     data = await state.get_data()
+
     master = await get_master_by_id(data["master_id"])
 
     schedule = (
         master["schedule"] if message.text.lower() == "залишити" else message.text
     )
+
+    await state.update_data(
+        schedule=schedule,
+    )
+
+    await state.set_state(
+        EditMasterState.calendar_id,
+    )
+
+    await message.answer(
+        "📅 Введіть новий Google Calendar ID.\n\n"
+        f"Поточний Calendar ID:\n"
+        f"{master['calendar_id'] or 'Не вказано'}\n\n"
+        "Або напишіть:\n"
+        "залишити — залишити поточний Calendar ID\n"
+        "пропустити — прибрати Calendar ID"
+    )
+
+
+@router.message(EditMasterState.calendar_id)
+async def edit_master_calendar_id(
+    message: Message,
+    state: FSMContext,
+):
+    data = await state.get_data()
+
+    master = await get_master_by_id(data["master_id"])
+
+    text = message.text.strip()
+
+    if text.lower() == "залишити":
+        calendar_id = master["calendar_id"]
+
+    elif text.lower() in [
+        "пропустити",
+        "skip",
+    ]:
+        calendar_id = None
+
+    else:
+        calendar_id = text
 
     await update_master(
         master_id=data["master_id"],
@@ -411,13 +608,16 @@ async def edit_master_schedule(message: Message, state: FSMContext):
         photo_id=data["photo_id"],
         description_ua=data["description_ua"],
         description_pt=data["description_pt"],
-        schedule=schedule,
+        schedule=data["schedule"],
+        calendar_id=calendar_id,
     )
 
     await state.clear()
 
     await message.answer(
-        "✅ Дані майстра оновлено!",
+        "✅ Дані майстра оновлено!\n\n"
+        f"📅 Calendar ID: "
+        f"{calendar_id or 'Не вказано'}",
         reply_markup=admin_menu(),
     )
 
@@ -426,23 +626,32 @@ async def edit_master_schedule(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "admin_delete_master")
-async def choose_master_to_delete(callback: CallbackQuery):
+async def choose_master_to_delete(
+    callback: CallbackQuery,
+):
     masters = await get_all_masters()
 
     if not masters:
         await callback.message.answer("Поки що немає майстрів для вимкнення.")
+
         await callback.answer()
         return
 
     await callback.message.answer(
         "❌ Оберіть майстра, якого потрібно вимкнути:",
-        reply_markup=masters_choose_keyboard(masters, "delete_master"),
+        reply_markup=masters_choose_keyboard(
+            masters,
+            "delete_master",
+        ),
     )
+
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("delete_master:"))
-async def delete_master_handler(callback: CallbackQuery):
+async def delete_master_handler(
+    callback: CallbackQuery,
+):
     master_id = int(callback.data.split(":")[1])
 
     await delete_master(master_id)
@@ -456,7 +665,10 @@ async def delete_master_handler(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "admin_back")
-async def admin_back(callback: CallbackQuery, state: FSMContext):
+async def admin_back(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
     await state.clear()
 
     await callback.message.answer(
