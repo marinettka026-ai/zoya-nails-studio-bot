@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 from config import GOOGLE_SERVICE_ACCOUNT_FILE
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+DEFAULT_TIMEZONE = "Europe/Lisbon"
 
 
 def get_calendar_service():
@@ -15,13 +16,18 @@ def get_calendar_service():
         scopes=SCOPES,
     )
 
-    return build("calendar", "v3", credentials=credentials)
+    return build(
+        "calendar",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
 
 
 def build_datetime(
     date: str,
     time: str,
-    timezone: str = "Europe/Lisbon",
+    timezone: str = DEFAULT_TIMEZONE,
 ):
     naive_dt = datetime.strptime(
         f"{date} {time}",
@@ -32,22 +38,31 @@ def build_datetime(
     )
 
 
-def is_time_free(
+def get_busy_intervals(
     calendar_id: str,
     date: str,
-    time: str,
-    duration: int,
-    timezone: str = "Europe/Lisbon",
+    start_time: str,
+    end_time: str,
+    timezone: str = DEFAULT_TIMEZONE,
 ):
+    """
+    Отримує всі зайняті інтервали календаря одним запитом
+    за вказаний робочий проміжок дня.
+    """
+    if not calendar_id:
+        return []
+
     service = get_calendar_service()
 
     start_dt = build_datetime(
         date,
-        time,
+        start_time,
         timezone,
     )
-    end_dt = start_dt + timedelta(
-        minutes=duration,
+    end_dt = build_datetime(
+        date,
+        end_time,
+        timezone,
     )
 
     body = {
@@ -59,9 +74,86 @@ def is_time_free(
 
     result = service.freebusy().query(body=body).execute()
 
-    busy_times = result["calendars"][calendar_id]["busy"]
+    busy_items = result.get("calendars", {}).get(calendar_id, {}).get("busy", [])
 
-    return len(busy_times) == 0
+    intervals = []
+
+    for item in busy_items:
+        busy_start = datetime.fromisoformat(item["start"].replace("Z", "+00:00"))
+        busy_end = datetime.fromisoformat(item["end"].replace("Z", "+00:00"))
+
+        intervals.append(
+            (
+                busy_start.astimezone(ZoneInfo(timezone)),
+                busy_end.astimezone(ZoneInfo(timezone)),
+            )
+        )
+
+    return intervals
+
+
+def slot_overlaps_busy(
+    date: str,
+    time: str,
+    duration: int,
+    busy_intervals,
+    timezone: str = DEFAULT_TIMEZONE,
+):
+    """
+    Перевіряє слот локально, без нового запиту до Google.
+    """
+    slot_start = build_datetime(
+        date,
+        time,
+        timezone,
+    )
+    slot_end = slot_start + timedelta(
+        minutes=duration,
+    )
+
+    for busy_start, busy_end in busy_intervals:
+        if slot_start < busy_end and slot_end > busy_start:
+            return True
+
+    return False
+
+
+def is_time_free(
+    calendar_id: str,
+    date: str,
+    time: str,
+    duration: int,
+    timezone: str = DEFAULT_TIMEZONE,
+):
+    """
+    Залишено для сумісності зі старим кодом.
+    Для масової перевірки слотів краще використовувати
+    get_busy_intervals() + slot_overlaps_busy().
+    """
+    start_dt = build_datetime(
+        date,
+        time,
+        timezone,
+    )
+    end_dt = start_dt + timedelta(
+        minutes=duration,
+    )
+
+    busy_intervals = get_busy_intervals(
+        calendar_id=calendar_id,
+        date=date,
+        start_time=start_dt.strftime("%H:%M"),
+        end_time=end_dt.strftime("%H:%M"),
+        timezone=timezone,
+    )
+
+    return not slot_overlaps_busy(
+        date=date,
+        time=time,
+        duration=duration,
+        busy_intervals=busy_intervals,
+        timezone=timezone,
+    )
 
 
 def create_calendar_event(
@@ -73,7 +165,7 @@ def create_calendar_event(
     date: str,
     time: str,
     duration: int,
-    timezone: str = "Europe/Lisbon",
+    timezone: str = DEFAULT_TIMEZONE,
 ):
     service = get_calendar_service()
 
@@ -122,7 +214,7 @@ def update_calendar_event(
     date: str,
     time: str,
     duration: int,
-    timezone: str = "Europe/Lisbon",
+    timezone: str = DEFAULT_TIMEZONE,
 ):
     if not calendar_id or not event_id:
         return None

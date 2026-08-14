@@ -31,7 +31,7 @@ from locales.pt import BUTTONS as PT_BUTTONS
 from locales.pt import TEXTS as PT_TEXTS
 from locales.ua import BUTTONS as UA_BUTTONS
 from locales.ua import TEXTS as UA_TEXTS
-from services.calendar import is_time_free
+from services.calendar import get_busy_intervals, slot_overlaps_busy
 from services.notifications import notify_master_about_booking
 from states.booking_state import BookingState
 
@@ -423,7 +423,10 @@ async def get_total_duration(selected_services: list[dict]) -> int:
 
 
 async def get_available_times(master, selected_services, selected_date: str):
-    work_start, work_end = get_work_hours_for_date(master["schedule"], selected_date)
+    work_start, work_end = get_work_hours_for_date(
+        master["schedule"],
+        selected_date,
+    )
     if not work_start or not work_end:
         return []
 
@@ -434,7 +437,24 @@ async def get_available_times(master, selected_services, selected_date: str):
     available_times = []
     work_end_dt = datetime.strptime(work_end, "%H:%M")
     today = date.today()
-    selected_day = datetime.strptime(selected_date, "%Y-%m-%d").date()
+    selected_day = datetime.strptime(
+        selected_date,
+        "%Y-%m-%d",
+    ).date()
+
+    busy_intervals = []
+
+    if master["calendar_id"]:
+        try:
+            busy_intervals = get_busy_intervals(
+                calendar_id=master["calendar_id"],
+                date=selected_date,
+                start_time=work_start,
+                end_time=work_end,
+            )
+        except Exception as error:
+            print("GOOGLE CALENDAR CHECK ERROR:", repr(error))
+            return []
 
     for time_str in generate_time_slots(work_start, work_end):
         slot_start = datetime.strptime(time_str, "%H:%M")
@@ -445,7 +465,10 @@ async def get_available_times(master, selected_services, selected_date: str):
 
         if selected_day == today:
             now = datetime.now()
-            candidate = datetime.combine(today, slot_start.time())
+            candidate = datetime.combine(
+                today,
+                slot_start.time(),
+            )
             if candidate <= now:
                 continue
 
@@ -457,29 +480,25 @@ async def get_available_times(master, selected_services, selected_date: str):
         if not available:
             continue
 
-        if master["calendar_id"]:
-            try:
-                if not is_time_free(
-                    calendar_id=master["calendar_id"],
-                    date=selected_date,
-                    time=time_str,
-                    duration=total_duration,
-                ):
-                    continue
-            except Exception as error:
-                print("GOOGLE CALENDAR CHECK ERROR:", repr(error))
-                continue
+        if busy_intervals and slot_overlaps_busy(
+            date=selected_date,
+            time=time_str,
+            duration=total_duration,
+            busy_intervals=busy_intervals,
+        ):
+            continue
 
         available_times.append(time_str)
 
     return available_times
 
 
-async def date_has_available_time(
-    master, selected_services, selected_date: str
-) -> bool:
-    times = await get_available_times(master, selected_services, selected_date)
-    return bool(times)
+def date_can_be_selected(master, selected_date: str) -> bool:
+    work_start, work_end = get_work_hours_for_date(
+        master["schedule"],
+        selected_date,
+    )
+    return bool(work_start and work_end)
 
 
 async def calendar_keyboard(
@@ -520,10 +539,8 @@ async def calendar_keyboard(
                 continue
 
             selected_date = day.strftime("%Y-%m-%d")
-            has_time = await date_has_available_time(
-                master, selected_services, selected_date
-            )
-            if has_time:
+
+            if date_can_be_selected(master, selected_date):
                 row.append(
                     InlineKeyboardButton(
                         text=str(day.day),
@@ -531,7 +548,12 @@ async def calendar_keyboard(
                     )
                 )
             else:
-                row.append(InlineKeyboardButton(text="×", callback_data="noop"))
+                row.append(
+                    InlineKeyboardButton(
+                        text="×",
+                        callback_data="noop",
+                    )
+                )
         keyboard.append(row)
 
     current_first = date(today.year, today.month, 1)
