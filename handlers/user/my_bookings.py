@@ -13,7 +13,7 @@ from aiogram.types import (
 )
 
 from database.queries import (
-    cancel_client_booking,
+    delete_client_booking,
     get_active_bookings_by_telegram_id,
     get_booking_by_id,
     get_booking_selected_services,
@@ -671,17 +671,39 @@ async def cancel_booking_confirm_handler(callback: CallbackQuery, state: FSMCont
                 event_id=event_id,
             )
 
-    cancelled = await cancel_client_booking(
+    master = await get_master_by_id(
+        booking["master_id"],
+    )
+
+    deleted = await delete_client_booking(
         booking_id=booking_id,
         telegram_id=callback.from_user.id,
     )
 
-    if not cancelled:
+    if not deleted:
         await callback.answer(
             "Не вдалося скасувати запис",
             show_alert=True,
         )
         return
+
+    if master and master["telegram_id"]:
+        try:
+            await callback.bot.send_message(
+                chat_id=master["telegram_id"],
+                text=(
+                    "❌ Клієнт скасував запис\n\n"
+                    f"👤 Клієнт: {booking['client_name']}\n"
+                    f"📞 Телефон: {booking['client_phone']}\n"
+                    f"📅 Дата: {booking['date']}\n"
+                    f"🕒 Час: {booking['time']}"
+                ),
+            )
+        except Exception as error:
+            print(
+                "MASTER CANCEL NOTIFICATION ERROR:",
+                repr(error),
+            )
 
     await state.clear()
 
@@ -741,6 +763,8 @@ async def reschedule_booking_handler(callback: CallbackQuery, state: FSMContext)
         old_date=booking["date"],
         old_time=booking["time"],
         old_calendar_event_id=booking["calendar_event_id"],
+        reschedule_client_name=booking["client_name"],
+        reschedule_client_phone=booking["client_phone"],
     )
     await state.set_state(MyBookingsState.choosing_new_date)
 
@@ -882,16 +906,7 @@ async def reschedule_confirm_handler(callback: CallbackQuery, state: FSMContext)
         data.get("old_calendar_event_id"),
     )
 
-    for event in old_calendar_events:
-        calendar_id = event.get("calendar_id")
-        event_id = event.get("event_id")
-
-        if calendar_id and event_id:
-            delete_calendar_event(
-                calendar_id=calendar_id,
-                event_id=event_id,
-            )
-
+    # Спочатку оновлюємо БД.
     changed = await reschedule_client_booking(
         booking_id=booking_id,
         telegram_id=callback.from_user.id,
@@ -908,23 +923,25 @@ async def reschedule_confirm_handler(callback: CallbackQuery, state: FSMContext)
 
     booking = await get_booking_by_id(booking_id)
     services = await get_booking_selected_services(booking_id)
-    calendar_events = []
 
-    for service in services:
-        service_master = await get_master_by_id(
-            service["master_id"],
-        )
+    # Створюємо нові події Google Calendar.
+    new_calendar_events = []
 
-        if not service_master or not service_master["calendar_id"]:
-            continue
+    try:
+        for service in services:
+            service_master = await get_master_by_id(
+                service["master_id"],
+            )
 
-        service_name = (
-            service["name_pt"]
-            if language == "pt" and service.get("name_pt")
-            else service["name_ua"]
-        )
+            if not service_master or not service_master["calendar_id"]:
+                continue
 
-        try:
+            service_name = (
+                service["name_pt"]
+                if language == "pt" and service.get("name_pt")
+                else service["name_ua"]
+            )
+
             event = create_calendar_event(
                 calendar_id=service_master["calendar_id"],
                 client_name=booking["client_name"],
@@ -939,19 +956,76 @@ async def reschedule_confirm_handler(callback: CallbackQuery, state: FSMContext)
             event_id = event.get("id")
 
             if event_id:
-                calendar_events.append(
+                new_calendar_events.append(
                     {
                         "calendar_id": service_master["calendar_id"],
                         "event_id": event_id,
                     }
                 )
-        except Exception as error:
-            print("RESCHEDULE GOOGLE CALENDAR ERROR:", error)
+
+    except Exception as error:
+        print(
+            "RESCHEDULE GOOGLE CALENDAR CREATE ERROR:",
+            repr(error),
+        )
+
+        # Якщо новий календар не створився повністю —
+        # прибираємо вже створені нові події.
+        for event in new_calendar_events:
+            try:
+                delete_calendar_event(
+                    calendar_id=event["calendar_id"],
+                    event_id=event["event_id"],
+                )
+            except Exception:
+                pass
+
+        await callback.answer(
+            ("Не вдалося оновити Google Calendar. " "Зверніться до майстра."),
+            show_alert=True,
+        )
+        return
+
+    # Нові події створені успішно — тепер видаляємо старі.
+    for event in old_calendar_events:
+        calendar_id = event.get("calendar_id")
+        event_id = event.get("event_id")
+
+        if calendar_id and event_id:
+            try:
+                delete_calendar_event(
+                    calendar_id=calendar_id,
+                    event_id=event_id,
+                )
+            except Exception as error:
+                print(
+                    "OLD GOOGLE EVENT DELETE ERROR:",
+                    repr(error),
+                )
 
     await update_booking_calendar_events(
         booking_id,
-        calendar_events,
+        new_calendar_events,
     )
+
+    # Повідомляємо майстра про перенесення.
+    if master and master["telegram_id"]:
+        try:
+            await callback.bot.send_message(
+                chat_id=master["telegram_id"],
+                text=(
+                    "🔄 Клієнт переніс запис\n\n"
+                    f"👤 Клієнт: {data.get('reschedule_client_name', booking['client_name'])}\n"
+                    f"📞 Телефон: {data.get('reschedule_client_phone', booking['client_phone'])}\n\n"
+                    f"Було: {data['old_date']} о {data['old_time']}\n"
+                    f"Стало: {new_date} о {new_time}"
+                ),
+            )
+        except Exception as error:
+            print(
+                "MASTER RESCHEDULE NOTIFICATION ERROR:",
+                repr(error),
+            )
 
     await state.clear()
 

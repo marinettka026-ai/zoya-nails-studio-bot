@@ -1848,3 +1848,78 @@ async def update_booking_calendar_events(
             (payload, booking_id),
         )
         await db.commit()
+
+
+async def delete_client_booking(
+    booking_id: int,
+    telegram_id: int,
+) -> bool:
+    """
+    Повністю видаляє запис клієнта з БД.
+    Перед видаленням перевіряє, що запис належить саме цьому Telegram-користувачу.
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT b.id
+            FROM bookings b
+            JOIN users u ON u.id = b.client_id
+            WHERE b.id = ?
+              AND u.telegram_id = ?
+            """,
+            (booking_id, telegram_id),
+        )
+        booking = await cursor.fetchone()
+
+        if not booking:
+            return False
+
+        await db.execute(
+            "DELETE FROM booking_services WHERE booking_id = ?",
+            (booking_id,),
+        )
+        await db.execute(
+            "DELETE FROM payments WHERE booking_id = ?",
+            (booking_id,),
+        )
+        await db.execute(
+            "DELETE FROM bookings WHERE id = ?",
+            (booking_id,),
+        )
+
+        await db.commit()
+        return True
+
+
+async def delete_booking_by_id(booking_id: int) -> bool:
+    """
+    Повністю видаляє запис з БД.
+    Використовується для скасування майстром/адміністратором.
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "SELECT id FROM bookings WHERE id = ?",
+            (booking_id,),
+        )
+        booking = await cursor.fetchone()
+
+        if not booking:
+            return False
+
+        await db.execute(
+            "DELETE FROM booking_services WHERE booking_id = ?",
+            (booking_id,),
+        )
+        await db.execute(
+            "DELETE FROM payments WHERE booking_id = ?",
+            (booking_id,),
+        )
+        await db.execute(
+            "DELETE FROM bookings WHERE id = ?",
+            (booking_id,),
+        )
+
+        await db.commit()
+        return True
