@@ -1,3 +1,4 @@
+import asyncio
 import calendar
 from datetime import date, datetime, timedelta
 
@@ -301,26 +302,6 @@ def services_checklist_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def add_more_keyboard(language: str = "ua"):
-    if language == "pt":
-        add_text = "➕ Adicionar outro serviço"
-        continue_text = "📅 Escolher data"
-    else:
-        add_text = "➕ Додати ще одну послугу"
-        continue_text = "📅 Обрати дату"
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=add_text, callback_data="add_another_service")],
-            [
-                InlineKeyboardButton(
-                    text=continue_text, callback_data="continue_booking"
-                )
-            ],
-        ]
-    )
-
-
 async def build_selected_services_from_state(data: dict):
     master_id = data["master_id"]
     selected_service_ids = list(dict.fromkeys(data.get("selected_service_ids", [])))
@@ -446,7 +427,8 @@ async def get_available_times(master, selected_services, selected_date: str):
 
     if master["calendar_id"]:
         try:
-            busy_intervals = get_busy_intervals(
+            busy_intervals = await asyncio.to_thread(
+                get_busy_intervals,
                 calendar_id=master["calendar_id"],
                 date=selected_date,
                 start_time=work_start,
@@ -501,6 +483,22 @@ def date_can_be_selected(master, selected_date: str) -> bool:
     return bool(work_start and work_end)
 
 
+async def date_has_available_time(
+    master,
+    selected_services,
+    selected_date: str,
+) -> bool:
+    if not date_can_be_selected(master, selected_date):
+        return False
+
+    times = await get_available_times(
+        master,
+        selected_services,
+        selected_date,
+    )
+    return bool(times)
+
+
 async def calendar_keyboard(
     master,
     selected_services,
@@ -531,29 +529,67 @@ async def calendar_keyboard(
     )
 
     cal = calendar.Calendar(firstweekday=0)
-    for week in cal.monthdatescalendar(year, month):
+    month_weeks = cal.monthdatescalendar(year, month)
+
+    dates_to_check = []
+    for week in month_weeks:
+        for day in week:
+            if (
+                day.month == month
+                and today <= day <= max_date
+                and date_can_be_selected(master, day.strftime("%Y-%m-%d"))
+            ):
+                dates_to_check.append(day)
+
+    availability = {}
+    if dates_to_check:
+        results = await asyncio.gather(
+            *[
+                date_has_available_time(
+                    master,
+                    selected_services,
+                    day.strftime("%Y-%m-%d"),
+                )
+                for day in dates_to_check
+            ],
+            return_exceptions=True,
+        )
+
+        for day, result in zip(dates_to_check, results):
+            availability[day] = (
+                bool(result) if not isinstance(result, Exception) else False
+            )
+
+    for week in month_weeks:
         row = []
+
         for day in week:
             if day.month != month or day < today or day > max_date:
-                row.append(InlineKeyboardButton(text="·", callback_data="noop"))
+                row.append(
+                    InlineKeyboardButton(
+                        text="·",
+                        callback_data="noop",
+                    )
+                )
                 continue
 
             selected_date = day.strftime("%Y-%m-%d")
 
-            if date_can_be_selected(master, selected_date):
+            if availability.get(day, False):
                 row.append(
                     InlineKeyboardButton(
-                        text=str(day.day),
+                        text=f"🟢 {day.day}",
                         callback_data=f"select_date:{selected_date}",
                     )
                 )
             else:
                 row.append(
                     InlineKeyboardButton(
-                        text="×",
+                        text=f"❌ {day.day}",
                         callback_data="noop",
                     )
                 )
+
         keyboard.append(row)
 
     current_first = date(today.year, today.month, 1)
@@ -707,9 +743,9 @@ async def send_calendar(
     month = month or today.month
 
     text = (
-        "📅 Escolha uma data. Os dias com × não têm horário livre para os serviços escolhidos."
+        "📅 Escolha uma data.\n\n🟢 — há horários livres\n❌ — não há horários livres"
         if language == "pt"
-        else "📅 Оберіть дату. Дні з × не мають вільного часу для обраних процедур."
+        else "📅 Оберіть дату.\n\n🟢 — є вільні години\n❌ — вільних годин немає"
     )
     await state.set_state(BookingState.choosing_date)
     await message.answer(
@@ -936,35 +972,20 @@ async def services_continue_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.update_data(selected_services=selected_services)
-    await state.set_state(BookingState.choosing_additional_service)
 
-    text = (
-        "Deseja adicionar outro serviço?"
+    loading_text = (
+        "⏳ A verificar os dias disponíveis..."
         if language == "pt"
-        else "Бажаєте додати ще одну послугу?"
+        else "⏳ Зачекайте, перевіряю вільні дати..."
     )
-    await callback.message.answer(text, reply_markup=add_more_keyboard(language))
+    await callback.message.answer(loading_text)
     await callback.answer()
 
-
-@router.callback_query(F.data == "add_another_service")
-async def add_another_service_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    language = await get_user_language(callback.from_user.id)
-    await send_gender_choice(callback.message, state, language)
-    await callback.answer()
-
-
-@router.callback_query(F.data == "continue_booking")
-async def continue_booking_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    language = await get_user_language(callback.from_user.id)
-    await send_calendar(callback.message, state, language)
-    await callback.answer()
+    await send_calendar(
+        callback.message,
+        state,
+        language,
+    )
 
 
 @router.callback_query(F.data.startswith("calendar_month:"))
@@ -995,25 +1016,42 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     selected_date = callback.data.split(":", 1)[1]
+    language = await get_user_language(callback.from_user.id)
+
+    loading_text = (
+        "⏳ Aguarde um momento, estou a procurar horários livres..."
+        if language == "pt"
+        else "⏳ Зачекайте трішки, шукаю вільні годинки..."
+    )
+    loading_message = await callback.message.answer(loading_text)
+    await callback.answer()
+
     data = await state.get_data()
     master = await get_master_by_id(data["master_id"])
-    times = await get_available_times(master, data["selected_services"], selected_date)
-    language = await get_user_language(callback.from_user.id)
+
+    times = await get_available_times(
+        master,
+        data["selected_services"],
+        selected_date,
+    )
 
     if not times:
         text = (
-            "Já não existem horários livres neste dia."
+            "❌ Já não existem horários livres neste dia. Escolha outra data."
             if language == "pt"
-            else "На цей день вільних годин уже немає."
+            else "❌ На цей день вільних годин уже немає. Оберіть іншу дату."
         )
-        await callback.answer(text, show_alert=True)
+        await loading_message.edit_text(text)
         return
 
     await state.update_data(date=selected_date)
     await state.set_state(BookingState.choosing_time)
+
     text = "🕒 Escolha a hora:" if language == "pt" else "🕒 Оберіть вільний час:"
-    await callback.message.answer(text, reply_markup=times_keyboard(times, language))
-    await callback.answer()
+    await loading_message.edit_text(
+        text,
+        reply_markup=times_keyboard(times, language),
+    )
 
 
 @router.callback_query(F.data == "nearest_free_time")
@@ -1022,6 +1060,15 @@ async def nearest_free_time_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     language = await get_user_language(callback.from_user.id)
+
+    loading_text = (
+        "⏳ Aguarde um momento, estou a procurar o horário livre mais próximo..."
+        if language == "pt"
+        else "⏳ Зачекайте трішки, шукаю найближчі вільні годинки..."
+    )
+    loading_message = await callback.message.answer(loading_text)
+    await callback.answer()
+
     data = await state.get_data()
     master = await get_master_by_id(data["master_id"])
     selected_services = data["selected_services"]
@@ -1029,27 +1076,34 @@ async def nearest_free_time_handler(callback: CallbackQuery, state: FSMContext):
     for offset in range(61):
         candidate_date = date.today() + timedelta(days=offset)
         date_str = candidate_date.strftime("%Y-%m-%d")
-        times = await get_available_times(master, selected_services, date_str)
+
+        times = await get_available_times(
+            master,
+            selected_services,
+            date_str,
+        )
+
         if times:
             await state.update_data(date=date_str)
             await state.set_state(BookingState.choosing_time)
+
             text = (
                 f"⚡ Próxima data disponível: {candidate_date.strftime('%d.%m.%Y')}"
                 if language == "pt"
                 else f"⚡ Найближча вільна дата: {candidate_date.strftime('%d.%m.%Y')}"
             )
-            await callback.message.answer(
-                text, reply_markup=times_keyboard(times, language)
+            await loading_message.edit_text(
+                text,
+                reply_markup=times_keyboard(times, language),
             )
-            await callback.answer()
             return
 
     text = (
-        "Não encontrei horários livres nos próximos 60 dias."
+        "❌ Não encontrei horários livres nos próximos 60 dias."
         if language == "pt"
-        else "Не знайшла вільного часу на найближчі 60 днів."
+        else "❌ Не знайшла вільного часу на найближчі 60 днів."
     )
-    await callback.answer(text, show_alert=True)
+    await loading_message.edit_text(text)
 
 
 @router.callback_query(F.data.startswith("select_time:"))

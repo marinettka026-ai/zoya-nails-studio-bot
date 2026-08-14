@@ -23,7 +23,7 @@ from database.queries import (
     update_booking_calendar_events,
 )
 from handlers.user.booking import (
-    date_can_be_selected,
+    date_has_available_time,
     get_available_times,
 )
 from keyboards.menus import main_menu
@@ -349,20 +349,23 @@ async def reschedule_calendar_keyboard(
 
             date_str = current_date.strftime("%Y-%m-%d")
 
-            if date_can_be_selected(
+            has_time = await date_has_available_time(
                 master,
+                selected_services,
                 date_str,
-            ):
+            )
+
+            if has_time:
                 row.append(
                     InlineKeyboardButton(
-                        text=str(day_number),
+                        text=f"🟢 {day_number}",
                         callback_data=f"reschedule_date:{date_str}",
                     )
                 )
             else:
                 row.append(
                     InlineKeyboardButton(
-                        text=f"{day_number}×",
+                        text=f"❌ {day_number}",
                         callback_data="reschedule_noop",
                     )
                 )
