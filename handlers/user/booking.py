@@ -499,6 +499,26 @@ async def date_has_available_time(
     return bool(times)
 
 
+SUPERSCRIPT_DIGITS = str.maketrans(
+    {
+        "0": "⁰",
+        "1": "¹",
+        "2": "²",
+        "3": "³",
+        "4": "⁴",
+        "5": "⁵",
+        "6": "⁶",
+        "7": "⁷",
+        "8": "⁸",
+        "9": "⁹",
+    }
+)
+
+
+def small_number(value: int) -> str:
+    return str(value).translate(SUPERSCRIPT_DIGITS)
+
+
 async def calendar_keyboard(
     master,
     selected_services,
@@ -564,10 +584,21 @@ async def calendar_keyboard(
         row = []
 
         for day in week:
-            if day.month != month or day < today or day > max_date:
+            day_text = small_number(day.day)
+
+            if day.month != month:
                 row.append(
                     InlineKeyboardButton(
-                        text="·",
+                        text=day_text,
+                        callback_data="noop",
+                    )
+                )
+                continue
+
+            if day < today or day > max_date:
+                row.append(
+                    InlineKeyboardButton(
+                        text=day_text,
                         callback_data="noop",
                     )
                 )
@@ -578,14 +609,14 @@ async def calendar_keyboard(
             if availability.get(day, False):
                 row.append(
                     InlineKeyboardButton(
-                        text=f"🟢 {day.day}",
+                        text=f"🟢{day_text}",
                         callback_data=f"select_date:{selected_date}",
                     )
                 )
             else:
                 row.append(
                     InlineKeyboardButton(
-                        text=f"❌ {day.day}",
+                        text=f"❌{day_text}",
                         callback_data="noop",
                     )
                 )
@@ -724,10 +755,16 @@ async def send_service_checklist(message: Message, state: FSMContext, language: 
 
 
 async def send_calendar(
-    message: Message, state: FSMContext, language: str, year=None, month=None
+    message: Message,
+    state: FSMContext,
+    language: str,
+    year=None,
+    month=None,
+    edit_message: Message | None = None,
 ):
     data = await state.get_data()
     selected_services = data.get("selected_services", [])
+
     if not selected_services:
         text = (
             "Selecione pelo menos um serviço."
@@ -743,17 +780,33 @@ async def send_calendar(
     month = month or today.month
 
     text = (
-        "📅 Escolha uma data.\n\n🟢 — há horários livres\n❌ — não há horários livres"
+        "📅 Escolha uma data.\n\n"
+        "🟢 — há horários livres\n"
+        "❌ — não há horários livres"
         if language == "pt"
-        else "📅 Оберіть дату.\n\n🟢 — є вільні години\n❌ — вільних годин немає"
+        else "📅 Оберіть дату.\n\n" "🟢 — є вільні години\n" "❌ — вільних годин немає"
     )
+
+    keyboard = await calendar_keyboard(
+        master,
+        selected_services,
+        year,
+        month,
+        language,
+    )
+
     await state.set_state(BookingState.choosing_date)
-    await message.answer(
-        text,
-        reply_markup=await calendar_keyboard(
-            master, selected_services, year, month, language
-        ),
-    )
+
+    if edit_message:
+        await edit_message.edit_text(
+            text,
+            reply_markup=keyboard,
+        )
+    else:
+        await message.answer(
+            text,
+            reply_markup=keyboard,
+        )
 
 
 async def send_confirmation(message: Message, state: FSMContext, language: str):
@@ -978,13 +1031,14 @@ async def services_continue_handler(callback: CallbackQuery, state: FSMContext):
         if language == "pt"
         else "⏳ Зачекайте, перевіряю вільні дати..."
     )
-    await callback.message.answer(loading_text)
+    loading_message = await callback.message.answer(loading_text)
     await callback.answer()
 
     await send_calendar(
         callback.message,
         state,
         language,
+        edit_message=loading_message,
     )
 
 

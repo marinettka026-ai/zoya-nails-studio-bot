@@ -72,6 +72,26 @@ MONTHS_PT = {
 }
 
 
+SUPERSCRIPT_DIGITS = str.maketrans(
+    {
+        "0": "⁰",
+        "1": "¹",
+        "2": "²",
+        "3": "³",
+        "4": "⁴",
+        "5": "⁵",
+        "6": "⁶",
+        "7": "⁷",
+        "8": "⁸",
+        "9": "⁹",
+    }
+)
+
+
+def small_number(value: int) -> str:
+    return str(value).translate(SUPERSCRIPT_DIGITS)
+
+
 async def get_user_language(telegram_id: int) -> str:
     user = await get_user_by_telegram_id(telegram_id)
 
@@ -337,11 +357,12 @@ async def reschedule_calendar_keyboard(
                 continue
 
             current_date = date(year, month, day_number)
+            day_text = small_number(day_number)
 
             if current_date < first_allowed or current_date > last_allowed:
                 row.append(
                     InlineKeyboardButton(
-                        text="·",
+                        text=day_text,
                         callback_data="reschedule_noop",
                     )
                 )
@@ -358,14 +379,14 @@ async def reschedule_calendar_keyboard(
             if has_time:
                 row.append(
                     InlineKeyboardButton(
-                        text=f"🟢 {day_number}",
+                        text=f"🟢{day_text}",
                         callback_data=f"reschedule_date:{date_str}",
                     )
                 )
             else:
                 row.append(
                     InlineKeyboardButton(
-                        text=f"❌ {day_number}",
+                        text=f"❌{day_text}",
                         callback_data="reschedule_noop",
                     )
                 )
