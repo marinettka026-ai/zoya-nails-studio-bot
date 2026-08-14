@@ -1,4 +1,4 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 from locales.ua import BUTTONS as UA
 from locales.pt import BUTTONS as PT
@@ -26,6 +26,7 @@ def main_menu(language: str = "ua"):
                 KeyboardButton(text=buttons["services"]),
                 KeyboardButton(text=buttons["masters"]),
             ],
+            [KeyboardButton(text=buttons["my_bookings"])],
             [KeyboardButton(text=buttons["contacts"])],
         ],
         resize_keyboard=True,

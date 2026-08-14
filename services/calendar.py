@@ -18,9 +18,18 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=credentials)
 
 
-def build_datetime(date: str, time: str, timezone: str = "Europe/Lisbon"):
-    naive_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
-    return naive_dt.replace(tzinfo=ZoneInfo(timezone))
+def build_datetime(
+    date: str,
+    time: str,
+    timezone: str = "Europe/Lisbon",
+):
+    naive_dt = datetime.strptime(
+        f"{date} {time}",
+        "%Y-%m-%d %H:%M",
+    )
+    return naive_dt.replace(
+        tzinfo=ZoneInfo(timezone),
+    )
 
 
 def is_time_free(
@@ -32,8 +41,14 @@ def is_time_free(
 ):
     service = get_calendar_service()
 
-    start_dt = build_datetime(date, time, timezone)
-    end_dt = start_dt + timedelta(minutes=duration)
+    start_dt = build_datetime(
+        date,
+        time,
+        timezone,
+    )
+    end_dt = start_dt + timedelta(
+        minutes=duration,
+    )
 
     body = {
         "timeMin": start_dt.isoformat(),
@@ -43,6 +58,7 @@ def is_time_free(
     }
 
     result = service.freebusy().query(body=body).execute()
+
     busy_times = result["calendars"][calendar_id]["busy"]
 
     return len(busy_times) == 0
@@ -61,11 +77,17 @@ def create_calendar_event(
 ):
     service = get_calendar_service()
 
-    start_dt = build_datetime(date, time, timezone)
-    end_dt = start_dt + timedelta(minutes=duration)
+    start_dt = build_datetime(
+        date,
+        time,
+        timezone,
+    )
+    end_dt = start_dt + timedelta(
+        minutes=duration,
+    )
 
     event = {
-        "summary": f"{service_name} — {client_name}",
+        "summary": (f"{service_name} — {client_name}"),
         "description": (
             f"Клієнт: {client_name}\n"
             f"Телефон: {client_phone}\n"
@@ -92,3 +114,80 @@ def create_calendar_event(
     )
 
     return created_event
+
+
+def update_calendar_event(
+    calendar_id: str,
+    event_id: str,
+    date: str,
+    time: str,
+    duration: int,
+    timezone: str = "Europe/Lisbon",
+):
+    if not calendar_id or not event_id:
+        return None
+
+    service = get_calendar_service()
+
+    event = (
+        service.events()
+        .get(
+            calendarId=calendar_id,
+            eventId=event_id,
+        )
+        .execute()
+    )
+
+    start_dt = build_datetime(
+        date,
+        time,
+        timezone,
+    )
+    end_dt = start_dt + timedelta(
+        minutes=duration,
+    )
+
+    event["start"] = {
+        "dateTime": start_dt.isoformat(),
+        "timeZone": timezone,
+    }
+
+    event["end"] = {
+        "dateTime": end_dt.isoformat(),
+        "timeZone": timezone,
+    }
+
+    updated_event = (
+        service.events()
+        .update(
+            calendarId=calendar_id,
+            eventId=event_id,
+            body=event,
+        )
+        .execute()
+    )
+
+    return updated_event
+
+
+def delete_calendar_event(
+    calendar_id: str,
+    event_id: str,
+):
+    if not calendar_id or not event_id:
+        return False
+
+    service = get_calendar_service()
+
+    try:
+        (
+            service.events()
+            .delete(
+                calendarId=calendar_id,
+                eventId=event_id,
+            )
+            .execute()
+        )
+        return True
+    except Exception:
+        return False

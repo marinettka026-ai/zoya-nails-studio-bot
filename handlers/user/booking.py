@@ -1,246 +1,41 @@
-from datetime import datetime, timedelta
+import calendar
+from datetime import date, datetime, timedelta
 
-from aiogram import Router, F
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-)
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from services.calendar import is_time_free, create_calendar_event
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from database.queries import (
-    get_user_by_telegram_id,
     accept_rules,
-    get_active_masters,
-    get_master_by_id,
-    get_services_by_master,
-    get_service_by_id,
     create_booking_from_selected_services,
-    is_selected_services_available,
-    build_booking_segments_from_items,
-    update_booking_status,
-    update_payment_status,
-    get_service_categories_by_master,
-    get_services_by_master_and_category,
-    get_service_extras,
-    get_service_extras_by_category,
+    get_active_masters,
     get_extra_by_id,
+    get_master_by_id,
+    get_service_by_id,
+    get_service_categories_by_master,
+    get_service_extras_by_category,
+    get_services_by_master,
+    get_user_by_telegram_id,
+    is_selected_services_available,
+    update_user_phone,
 )
-
-from services.notifications import notify_master_about_booking
-
-from keyboards.inline import (
-    booking_rules_keyboard,
-    booking_confirm_keyboard,
-    deposit_keyboard,
-    add_another_service_keyboard,
-)
+from keyboards.inline import booking_confirm_keyboard, booking_rules_keyboard
 from keyboards.menus import main_menu
-from locales.ua import TEXTS as UA_TEXTS, BUTTONS as UA_BUTTONS
-from locales.pt import TEXTS as PT_TEXTS, BUTTONS as PT_BUTTONS
+from keyboards.reply import phone_keyboard, remove_reply_keyboard
+from locales.pt import BUTTONS as PT_BUTTONS
+from locales.pt import TEXTS as PT_TEXTS
+from locales.ua import BUTTONS as UA_BUTTONS
+from locales.ua import TEXTS as UA_TEXTS
+from services.calendar import is_time_free
+from services.notifications import notify_master_about_booking
 from states.booking_state import BookingState
 
 router = Router()
-
-PAYMENT_DETAILS = "IBAN / MBWay / реквізити клієнтки будуть тут"
-SALON_ADDRESS = "Cascais"
-
-
-async def get_user_language(telegram_id: int) -> str:
-    user = await get_user_by_telegram_id(telegram_id)
-
-    if user and user["language"]:
-        return user["language"]
-
-    return "ua"
-
-
-def get_texts_and_buttons(language: str):
-    if language == "pt":
-        return PT_TEXTS, PT_BUTTONS
-
-    return UA_TEXTS, UA_BUTTONS
-
-
-async def is_user_blocked(telegram_id: int) -> bool:
-    user = await get_user_by_telegram_id(telegram_id)
-    return bool(user and user["is_blocked"])
-
-
-async def send_blocked_message(message: Message):
-    await message.answer(
-        "⛔ Запис через бота для вас недоступний.\n\n"
-        "Будь ласка, зв’яжіться з майстром напряму."
-    )
-
-
-async def stop_blocked_callback(callback: CallbackQuery) -> bool:
-    if await is_user_blocked(callback.from_user.id):
-        await callback.message.answer(
-            "⛔ Запис через бота для вас недоступний.\n\n"
-            "Будь ласка, зв’яжіться з майстром напряму."
-        )
-        await callback.answer()
-        return True
-
-    return False
-
-
-async def stop_blocked_message(message: Message) -> bool:
-    if await is_user_blocked(message.from_user.id):
-        await send_blocked_message(message)
-        return True
-
-    return False
-
-
-def masters_keyboard(masters, language: str = "ua"):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-    keyboard = []
-
-    for master in masters:
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=f"🌸 {master['name']}",
-                    callback_data=f"select_master:{master['id']}",
-                )
-            ]
-        )
-
-    keyboard.append(
-        [InlineKeyboardButton(text=buttons["back"], callback_data="back_main")]
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def service_categories_keyboard(categories, language: str = "ua"):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-    keyboard = []
-
-    for index, category in enumerate(categories):
-        category_name = (
-            category["category_pt"]
-            if language == "pt" and category["category_pt"]
-            else category["category_ua"]
-        )
-
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=f"💅 {category_name}",
-                    callback_data=f"select_category:{index}",
-                )
-            ]
-        )
-
-    keyboard.append(
-        [
-            InlineKeyboardButton(
-                text=buttons["back"],
-                callback_data="back_to_masters",
-            )
-        ]
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def services_keyboard(services, language: str = "ua"):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-    keyboard = []
-
-    for service in services:
-        name = (
-            service["name_pt"]
-            if language == "pt" and service["name_pt"]
-            else service["name_ua"]
-        )
-
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=f"💅 {name} — {service['price']}€",
-                    callback_data=f"select_service:{service['id']}",
-                )
-            ]
-        )
-
-    keyboard.append(
-        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_categories")]
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def extras_keyboard(extras, selected_extras=None, language: str = "ua"):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-
-    if selected_extras is None:
-        selected_extras = []
-
-    keyboard = []
-
-    for extra in extras:
-        extra_id = extra["id"]
-
-        name = (
-            extra["name_pt"]
-            if language == "pt" and extra["name_pt"]
-            else extra["name_ua"]
-        )
-
-        mark = "✅" if extra_id in selected_extras else "➕"
-
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{mark} {name} — {extra['price']}€",
-                    callback_data=f"toggle_extra:{extra_id}",
-                )
-            ]
-        )
-
-    skip_text = "Sem adicionais" if language == "pt" else "Без додаткових послуг"
-
-    keyboard.append([InlineKeyboardButton(text=skip_text, callback_data="extras_skip")])
-
-    keyboard.append(
-        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_services")]
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def dates_keyboard(language: str = "ua"):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-    keyboard = []
-
-    today = datetime.now()
-
-    for i in range(30):
-        date = today + timedelta(days=i)
-        date_text = date.strftime("%d.%m.%Y")
-        callback_date = date.strftime("%Y-%m-%d")
-
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=date_text,
-                    callback_data=f"select_date:{callback_date}",
-                )
-            ]
-        )
-
-    keyboard.append(
-        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_services")]
-    )
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 
 DAY_NAMES_UA = {
     0: "Пн",
@@ -252,6 +47,328 @@ DAY_NAMES_UA = {
     6: "Нд",
 }
 
+MONTHS_UA = {
+    1: "Січень",
+    2: "Лютий",
+    3: "Березень",
+    4: "Квітень",
+    5: "Травень",
+    6: "Червень",
+    7: "Липень",
+    8: "Серпень",
+    9: "Вересень",
+    10: "Жовтень",
+    11: "Листопад",
+    12: "Грудень",
+}
+
+MONTHS_PT = {
+    1: "Janeiro",
+    2: "Fevereiro",
+    3: "Março",
+    4: "Abril",
+    5: "Maio",
+    6: "Junho",
+    7: "Julho",
+    8: "Agosto",
+    9: "Setembro",
+    10: "Outubro",
+    11: "Novembro",
+    12: "Dezembro",
+}
+
+
+async def get_user_language(telegram_id: int) -> str:
+    user = await get_user_by_telegram_id(telegram_id)
+    if user and user["language"]:
+        return user["language"]
+    return "ua"
+
+
+def get_texts_and_buttons(language: str):
+    if language == "pt":
+        return PT_TEXTS, PT_BUTTONS
+    return UA_TEXTS, UA_BUTTONS
+
+
+async def is_user_blocked(telegram_id: int) -> bool:
+    user = await get_user_by_telegram_id(telegram_id)
+    return bool(user and user["is_blocked"])
+
+
+async def stop_blocked_callback(callback: CallbackQuery) -> bool:
+    if not await is_user_blocked(callback.from_user.id):
+        return False
+
+    language = await get_user_language(callback.from_user.id)
+    text = (
+        "⛔ A marcação através do bot não está disponível para si.\n\n"
+        "Por favor, contacte a profissional diretamente."
+        if language == "pt"
+        else "⛔ Запис через бота для вас недоступний.\n\n"
+        "Будь ласка, зв’яжіться з майстром напряму."
+    )
+    await callback.message.answer(text)
+    await callback.answer()
+    return True
+
+
+async def stop_blocked_message(message: Message) -> bool:
+    if not await is_user_blocked(message.from_user.id):
+        return False
+
+    language = await get_user_language(message.from_user.id)
+    text = (
+        "⛔ A marcação através do bot não está disponível para si.\n\n"
+        "Por favor, contacte a profissional diretamente."
+        if language == "pt"
+        else "⛔ Запис через бота для вас недоступний.\n\n"
+        "Будь ласка, зв’яжіться з майстром напряму."
+    )
+    await message.answer(text)
+    return True
+
+
+def masters_keyboard(masters, language: str = "ua"):
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text=f"🌸 {master['name']}",
+                callback_data=f"select_master:{master['id']}",
+            )
+        ]
+        for master in masters
+    ]
+    keyboard.append(
+        [InlineKeyboardButton(text=buttons["back"], callback_data="back_main")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+# Залишено тимчасово для сумісності з profile.py.
+def service_categories_keyboard(categories, language: str = "ua"):
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+    keyboard = []
+
+    for index, category in enumerate(categories):
+        name = (
+            category["category_pt"]
+            if language == "pt" and category["category_pt"]
+            else category["category_ua"]
+        )
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💅 {name}",
+                    callback_data=f"legacy_category:{index}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_masters")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def gender_keyboard(language: str = "ua"):
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+
+    if language == "pt":
+        female = "👩 Serviços femininos"
+        male = "👨 Serviços masculinos"
+    else:
+        female = "👩 Жіночі послуги"
+        male = "👨 Чоловічі послуги"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=female, callback_data="select_gender:female")],
+            [InlineKeyboardButton(text=male, callback_data="select_gender:male")],
+            [
+                InlineKeyboardButton(
+                    text=buttons["back"], callback_data="back_to_masters"
+                )
+            ],
+        ]
+    )
+
+
+def is_male_text(*values) -> bool:
+    text = " ".join(str(value or "").lower() for value in values)
+    markers = ("чолов", "муж", "mascul", "homem")
+    return any(marker in text for marker in markers)
+
+
+def service_matches_gender(service, gender: str) -> bool:
+    male = is_male_text(
+        service["category_ua"],
+        service["category_pt"],
+        service["name_ua"],
+        service["name_pt"],
+    )
+    return male if gender == "male" else not male
+
+
+async def get_catalog(master_id: int, gender: str):
+    services = await get_services_by_master(master_id)
+    services = [
+        service for service in services if service_matches_gender(service, gender)
+    ]
+
+    extras = []
+    seen_extra_ids = set()
+
+    categories = await get_service_categories_by_master(master_id)
+    for category in categories:
+        category_ua = category["category_ua"]
+        if not category_ua:
+            continue
+
+        category_is_male = is_male_text(category_ua, category["category_pt"])
+        if (gender == "male") != category_is_male:
+            continue
+
+        category_extras = await get_service_extras_by_category(
+            master_id=master_id,
+            category_ua=category_ua,
+        )
+        for extra in category_extras:
+            if extra["id"] not in seen_extra_ids:
+                extras.append(extra)
+                seen_extra_ids.add(extra["id"])
+
+    return services, extras
+
+
+def services_checklist_keyboard(
+    services,
+    extras,
+    selected_service_ids,
+    selected_extra_ids,
+    language: str = "ua",
+):
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+    keyboard = []
+
+    for service in services:
+        service_id = service["id"]
+        mark = "✅" if service_id in selected_service_ids else "⬜"
+        name = (
+            service["name_pt"]
+            if language == "pt" and service["name_pt"]
+            else service["name_ua"]
+        )
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{mark} {name} — {service['price']}€",
+                    callback_data=f"toggle_service:{service_id}",
+                )
+            ]
+        )
+
+    if extras:
+        divider = "➕ Adicionais" if language == "pt" else "➕ Додаткові послуги"
+        keyboard.append([InlineKeyboardButton(text=divider, callback_data="noop")])
+
+        for extra in extras:
+            extra_id = extra["id"]
+            mark = "✅" if extra_id in selected_extra_ids else "⬜"
+            name = (
+                extra["name_pt"]
+                if language == "pt" and extra["name_pt"]
+                else extra["name_ua"]
+            )
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{mark} {name} — {extra['price']}€",
+                        callback_data=f"toggle_catalog_extra:{extra_id}",
+                    )
+                ]
+            )
+
+    continue_text = "➡️ Continuar" if language == "pt" else "➡️ Продовжити"
+    keyboard.append(
+        [InlineKeyboardButton(text=continue_text, callback_data="services_continue")]
+    )
+    keyboard.append(
+        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_gender")]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def add_more_keyboard(language: str = "ua"):
+    if language == "pt":
+        add_text = "➕ Adicionar outro serviço"
+        continue_text = "📅 Escolher data"
+    else:
+        add_text = "➕ Додати ще одну послугу"
+        continue_text = "📅 Обрати дату"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=add_text, callback_data="add_another_service")],
+            [
+                InlineKeyboardButton(
+                    text=continue_text, callback_data="continue_booking"
+                )
+            ],
+        ]
+    )
+
+
+async def build_selected_services_from_state(data: dict):
+    master_id = data["master_id"]
+    selected_service_ids = list(dict.fromkeys(data.get("selected_service_ids", [])))
+    selected_extra_ids = list(dict.fromkeys(data.get("selected_extra_ids", [])))
+
+    result = []
+    category_to_item = {}
+
+    for service_id in selected_service_ids:
+        service = await get_service_by_id(service_id)
+        if not service or service["master_id"] != master_id:
+            continue
+
+        item = {
+            "master_id": master_id,
+            "service_id": service_id,
+            "category_ua": service["category_ua"],
+            "price": service["price"],
+            "duration": service["duration"],
+            "extras": [],
+        }
+        result.append(item)
+        category_to_item.setdefault(service["category_ua"], item)
+
+    orphan_extras = []
+
+    for extra_id in selected_extra_ids:
+        extra = await get_extra_by_id(extra_id)
+        if not extra or extra["master_id"] != master_id:
+            continue
+
+        parent = category_to_item.get(extra["category_ua"])
+        if not parent:
+            orphan_extras.append(extra)
+            continue
+
+        parent["extras"].append(
+            {
+                "id": extra["id"],
+                "name_ua": extra["name_ua"],
+                "name_pt": extra["name_pt"],
+                "price": extra["price"],
+                "duration": extra["duration"],
+            }
+        )
+
+    return result, orphan_extras
+
 
 def get_work_hours_for_date(schedule: str, selected_date: str):
     if not schedule:
@@ -262,44 +379,30 @@ def get_work_hours_for_date(schedule: str, selected_date: str):
 
     for line in schedule.splitlines():
         line = line.strip()
-
-        if not line:
+        if not line or not line.startswith(day_name):
             continue
 
-        if not line.startswith(day_name):
-            continue
-
-        if "вихідний" in line.lower():
+        lowered = line.lower()
+        if "вихідний" in lowered or "folga" in lowered:
             return None, None
 
         if ":" not in line:
             continue
 
         _, hours = line.split(":", 1)
-        hours = hours.strip()
-
         if "-" not in hours:
             continue
 
-        work_start, work_end = hours.split("-", 1)
-
+        work_start, work_end = hours.strip().split("-", 1)
         return work_start.strip(), work_end.strip()
 
     return None, None
 
 
-def generate_time_slots(
-    work_start: str,
-    work_end: str,
-    duration: int = 60,
-    step: int = 30,
-):
+def generate_time_slots(work_start: str, work_end: str, step: int = 30):
     slots = []
-
-    start = datetime.strptime(work_start, "%H:%M")
+    current = datetime.strptime(work_start, "%H:%M")
     end = datetime.strptime(work_end, "%H:%M")
-
-    current = start
 
     while current <= end:
         slots.append(current.strftime("%H:%M"))
@@ -308,142 +411,377 @@ def generate_time_slots(
     return slots
 
 
-def times_overlap(start_1, end_1, start_2, end_2):
-    return start_1 < end_2 and start_2 < end_1
+async def get_total_duration(selected_services: list[dict]) -> int:
+    total = 0
+    for item in selected_services:
+        service = await get_service_by_id(item["service_id"])
+        if not service:
+            continue
+        total += int(service["duration"])
+        total += sum(int(extra.get("duration", 0)) for extra in item.get("extras", []))
+    return total
 
 
-async def times_keyboard(
-    master,
-    service,
-    selected_services,
-    selected_date: str,
-    language: str = "ua",
-):
-    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
-    total_duration = int(service["duration"])
-
-    work_start, work_end = get_work_hours_for_date(
-        master["schedule"],
-        selected_date,
-    )
-
+async def get_available_times(master, selected_services, selected_date: str):
+    work_start, work_end = get_work_hours_for_date(master["schedule"], selected_date)
     if not work_start or not work_end:
-        all_times = []
-    else:
-        all_times = generate_time_slots(
-            work_start=work_start,
-            work_end=work_end,
-            duration=total_duration,
-        )
+        return []
 
-    keyboard = []
+    total_duration = await get_total_duration(selected_services)
+    if total_duration <= 0:
+        return []
 
-    for time in all_times:
-        slot_start = datetime.strptime(time, "%H:%M")
+    available_times = []
+    work_end_dt = datetime.strptime(work_end, "%H:%M")
+    today = date.today()
+    selected_day = datetime.strptime(selected_date, "%Y-%m-%d").date()
+
+    for time_str in generate_time_slots(work_start, work_end):
+        slot_start = datetime.strptime(time_str, "%H:%M")
         slot_end = slot_start + timedelta(minutes=total_duration)
-        work_end_time = datetime.strptime(work_end, "%H:%M")
 
-        # Процедура повинна повністю поміщатися в робочий день
-        if slot_end > work_end_time:
+        if slot_end > work_end_dt:
             continue
 
-        # Перевіряємо майстра та ресурси студії через БД
+        if selected_day == today:
+            now = datetime.now()
+            candidate = datetime.combine(today, slot_start.time())
+            if candidate <= now:
+                continue
+
         available = await is_selected_services_available(
             selected_services=selected_services,
             date=selected_date,
-            start_time=time,
+            start_time=time_str,
         )
-
-        print("========== SLOT CHECK ==========")
-        print("MASTER:", master["name"])
-        print("DATE:", selected_date)
-        print("TIME:", time)
-        print("SLOT END:", slot_end.strftime("%H:%M"))
-        print("TOTAL DURATION:", total_duration)
-        print("SELECTED SERVICES:", selected_services)
-        print("DB AVAILABLE:", available)
-        print("CALENDAR ID:", master["calendar_id"])
-
         if not available:
-            print("RESULT: BLOCKED BY DATABASE")
-            print("================================")
             continue
 
-        # Перевіряємо особистий Google Calendar обраного майстра
         if master["calendar_id"]:
             try:
-                calendar_free = is_time_free(
+                if not is_time_free(
                     calendar_id=master["calendar_id"],
                     date=selected_date,
-                    time=time,
+                    time=time_str,
                     duration=total_duration,
-                )
-
-                print("GOOGLE CALENDAR FREE:", calendar_free)
-
-                if not calendar_free:
-                    print("RESULT: BLOCKED BY GOOGLE CALENDAR")
-                    print("================================")
+                ):
                     continue
-
             except Exception as error:
                 print("GOOGLE CALENDAR CHECK ERROR:", repr(error))
-                print("RESULT: BLOCKED BECAUSE CALENDAR CHECK FAILED")
-                print("================================")
                 continue
-        else:
-            print("GOOGLE CALENDAR: NO CALENDAR ID")
 
-        print("RESULT: SLOT IS AVAILABLE")
-        print("================================")
+        available_times.append(time_str)
 
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=time,
-                    callback_data=f"select_time:{time}",
-                )
-            ]
-        )
+    return available_times
 
-    if not keyboard:
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text="❌ Немає вільного часу",
-                    callback_data="no_free_time",
-                )
-            ]
-        )
 
-    keyboard.append(
+async def date_has_available_time(
+    master, selected_services, selected_date: str
+) -> bool:
+    times = await get_available_times(master, selected_services, selected_date)
+    return bool(times)
+
+
+async def calendar_keyboard(
+    master,
+    selected_services,
+    year: int,
+    month: int,
+    language: str = "ua",
+):
+    today = date.today()
+    max_date = today + timedelta(days=60)
+    month_names = MONTHS_PT if language == "pt" else MONTHS_UA
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+
+    keyboard = [
         [
             InlineKeyboardButton(
-                text=buttons["back"],
-                callback_data="back_to_dates",
+                text=f"📅 {month_names[month]} {year}", callback_data="noop"
             )
         ]
+    ]
+
+    weekdays = (
+        ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+        if language == "pt"
+        else ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
+    )
+    keyboard.append(
+        [InlineKeyboardButton(text=day, callback_data="noop") for day in weekdays]
+    )
+
+    cal = calendar.Calendar(firstweekday=0)
+    for week in cal.monthdatescalendar(year, month):
+        row = []
+        for day in week:
+            if day.month != month or day < today or day > max_date:
+                row.append(InlineKeyboardButton(text="·", callback_data="noop"))
+                continue
+
+            selected_date = day.strftime("%Y-%m-%d")
+            has_time = await date_has_available_time(
+                master, selected_services, selected_date
+            )
+            if has_time:
+                row.append(
+                    InlineKeyboardButton(
+                        text=str(day.day),
+                        callback_data=f"select_date:{selected_date}",
+                    )
+                )
+            else:
+                row.append(InlineKeyboardButton(text="×", callback_data="noop"))
+        keyboard.append(row)
+
+    current_first = date(today.year, today.month, 1)
+    shown_first = date(year, month, 1)
+
+    prev_month = shown_first.replace(day=1) - timedelta(days=1)
+    if month == 12:
+        next_year, next_month = year + 1, 1
+    else:
+        next_year, next_month = year, month + 1
+
+    nav = []
+    if shown_first > current_first:
+        nav.append(
+            InlineKeyboardButton(
+                text="◀️",
+                callback_data=f"calendar_month:{prev_month.year}:{prev_month.month}",
+            )
+        )
+    nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+    if date(next_year, next_month, 1) <= max_date:
+        nav.append(
+            InlineKeyboardButton(
+                text="▶️",
+                callback_data=f"calendar_month:{next_year}:{next_month}",
+            )
+        )
+    keyboard.append(nav)
+
+    nearest = (
+        "⚡ Próximo horário disponível"
+        if language == "pt"
+        else "⚡ Найближчий вільний час"
+    )
+    keyboard.append(
+        [InlineKeyboardButton(text=nearest, callback_data="nearest_free_time")]
+    )
+    keyboard.append(
+        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_services")]
     )
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+def times_keyboard(times: list[str], language: str = "ua"):
+    buttons = PT_BUTTONS if language == "pt" else UA_BUTTONS
+    keyboard = []
+
+    for index in range(0, len(times), 3):
+        keyboard.append(
+            [
+                InlineKeyboardButton(text=time, callback_data=f"select_time:{time}")
+                for time in times[index : index + 3]
+            ]
+        )
+
+    if not times:
+        text = (
+            "❌ Sem horários livres" if language == "pt" else "❌ Немає вільного часу"
+        )
+        keyboard.append([InlineKeyboardButton(text=text, callback_data="noop")])
+
+    keyboard.append(
+        [InlineKeyboardButton(text=buttons["back"], callback_data="back_to_dates")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+async def send_masters(message: Message, state: FSMContext, language: str):
+    texts, _ = get_texts_and_buttons(language)
+    masters = await get_active_masters()
+
+    if not masters:
+        text = (
+            "De momento não existem profissionais disponíveis."
+            if language == "pt"
+            else "Поки що немає доступних майстрів. Спробуйте пізніше."
+        )
+        await message.answer(text)
+        return
+
+    await state.set_state(BookingState.choosing_master)
+    await message.answer(
+        texts["choose_master"], reply_markup=masters_keyboard(masters, language)
+    )
+
+
+async def send_gender_choice(message: Message, state: FSMContext, language: str):
+    text = (
+        "💅 Escolha o tipo de serviços:"
+        if language == "pt"
+        else "💅 Оберіть тип послуг:"
+    )
+    await state.set_state(BookingState.choosing_gender)
+    await message.answer(text, reply_markup=gender_keyboard(language))
+
+
+async def send_service_checklist(message: Message, state: FSMContext, language: str):
+    data = await state.get_data()
+    master_id = data["master_id"]
+    gender = data["gender"]
+    services, extras = await get_catalog(master_id, gender)
+
+    if not services:
+        text = (
+            "Não há serviços nesta categoria."
+            if language == "pt"
+            else "У цій категорії поки немає послуг."
+        )
+        await message.answer(text)
+        return
+
+    selected_service_ids = data.get("selected_service_ids", [])
+    selected_extra_ids = data.get("selected_extra_ids", [])
+
+    text = (
+        "💅 Selecione tudo o que precisa. Pode escolher vários serviços:"
+        if language == "pt"
+        else "💅 Позначте все, що вам потрібно. Можна обрати декілька послуг:"
+    )
+    await state.set_state(BookingState.choosing_services)
+    await message.answer(
+        text,
+        reply_markup=services_checklist_keyboard(
+            services,
+            extras,
+            selected_service_ids,
+            selected_extra_ids,
+            language,
+        ),
+    )
+
+
+async def send_calendar(
+    message: Message, state: FSMContext, language: str, year=None, month=None
+):
+    data = await state.get_data()
+    selected_services = data.get("selected_services", [])
+    if not selected_services:
+        text = (
+            "Selecione pelo menos um serviço."
+            if language == "pt"
+            else "Оберіть хоча б одну послугу."
+        )
+        await message.answer(text)
+        return
+
+    master = await get_master_by_id(data["master_id"])
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
+
+    text = (
+        "📅 Escolha uma data. Os dias com × não têm horário livre para os serviços escolhidos."
+        if language == "pt"
+        else "📅 Оберіть дату. Дні з × не мають вільного часу для обраних процедур."
+    )
+    await state.set_state(BookingState.choosing_date)
+    await message.answer(
+        text,
+        reply_markup=await calendar_keyboard(
+            master, selected_services, year, month, language
+        ),
+    )
+
+
+async def send_confirmation(message: Message, state: FSMContext, language: str):
+    data = await state.get_data()
+    selected_services = data.get("selected_services", [])
+    master = await get_master_by_id(data["master_id"])
+
+    total_price = 0.0
+    total_duration = 0
+    lines = []
+
+    for item in selected_services:
+        service = await get_service_by_id(item["service_id"])
+        if not service:
+            continue
+
+        name = (
+            service["name_pt"]
+            if language == "pt" and service["name_pt"]
+            else service["name_ua"]
+        )
+        item_price = float(service["price"])
+        item_duration = int(service["duration"])
+        lines.append(f"• {name} — {service['price']}€")
+
+        for extra in item.get("extras", []):
+            extra_name = (
+                extra["name_pt"]
+                if language == "pt" and extra.get("name_pt")
+                else extra["name_ua"]
+            )
+            lines.append(f"  + {extra_name} — {extra['price']}€")
+            item_price += float(extra.get("price", 0))
+            item_duration += int(extra.get("duration", 0))
+
+        total_price += item_price
+        total_duration += item_duration
+
+    hours, minutes = divmod(total_duration, 60)
+    if language == "pt":
+        duration_text = f"{hours} h {minutes} min" if minutes else f"{hours} h"
+        text = (
+            "✅ Confirme a sua marcação:\n\n"
+            f"👩 Profissional: {master['name']}\n"
+            f"💅 Serviços:\n" + "\n".join(lines) + "\n\n"
+            f"📅 Data: {data['date']}\n"
+            f"🕒 Hora: {data['time']}\n"
+            f"⏳ Duração: {duration_text}\n"
+            f"💶 Total: {total_price:g}€\n"
+            f"📱 Telefone: {data['client_phone']}"
+        )
+    else:
+        duration_text = f"{hours} год {minutes} хв" if minutes else f"{hours} год"
+        text = (
+            "✅ Підтвердіть запис:\n\n"
+            f"👩 Майстер: {master['name']}\n"
+            f"💅 Послуги:\n" + "\n".join(lines) + "\n\n"
+            f"📅 Дата: {data['date']}\n"
+            f"🕒 Час: {data['time']}\n"
+            f"⏳ Тривалість: {duration_text}\n"
+            f"💶 Вартість: {total_price:g}€\n"
+            f"📱 Телефон: {data['client_phone']}"
+        )
+
+    await state.update_data(total_price=total_price, total_duration=total_duration)
+    await state.set_state(BookingState.confirming_booking)
+    await message.answer(text, reply_markup=booking_confirm_keyboard(language))
+
+
 @router.message(F.text.in_(["📅 Записатися", "📅 Marcar"]))
 async def start_booking(message: Message, state: FSMContext):
-    print("BOOKING BUTTON PRESSED")
-
     if await stop_blocked_message(message):
         return
 
     language = await get_user_language(message.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
+    user = await get_user_by_telegram_id(message.from_user.id)
     await state.clear()
-    await state.set_state(BookingState.rules)
 
+    if user and user["rules_accepted"]:
+        await send_masters(message, state, language)
+        return
+
+    texts, _ = get_texts_and_buttons(language)
+    await state.set_state(BookingState.rules)
     await message.answer(
-        texts["booking_rules"],
-        reply_markup=booking_rules_keyboard(language),
+        texts["booking_rules"], reply_markup=booking_rules_keyboard(language)
     )
 
 
@@ -453,26 +791,8 @@ async def rules_accept_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     await accept_rules(callback.from_user.id)
-
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    masters = await get_active_masters()
-
-    if not masters:
-        await callback.message.answer(
-            "Поки що немає доступних майстрів. Спробуйте пізніше."
-        )
-        await callback.answer()
-        return
-
-    await state.set_state(BookingState.choosing_master)
-
-    await callback.message.answer(
-        texts["choose_master"],
-        reply_markup=masters_keyboard(masters, language),
-    )
-
+    await send_masters(callback.message, state, language)
     await callback.answer()
 
 
@@ -481,230 +801,127 @@ async def select_master_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    master_id = int(callback.data.split(":")[1])
-
-    await state.update_data(master_id=master_id)
-    await state.set_state(BookingState.choosing_category)
-
-    language = await get_user_language(callback.from_user.id)
-
-    categories = await get_service_categories_by_master(master_id)
-
-    if not categories:
-        await callback.message.answer("У цього майстра поки що немає доданих послуг.")
-        await callback.answer()
-        return
-
-    if language == "pt":
-        message_text = "💅 Escolha uma categoria:"
-    else:
-        message_text = "💅 Оберіть категорію послуги:"
-
-    await callback.message.answer(
-        message_text,
-        reply_markup=service_categories_keyboard(categories, language),
-    )
-
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("select_category:"))
-async def select_category_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    category_index = int(callback.data.split(":")[1])
-
-    data = await state.get_data()
-    master_id = data["master_id"]
-
-    categories = await get_service_categories_by_master(master_id)
-
-    if category_index >= len(categories):
-        await callback.answer("Категорію не знайдено", show_alert=True)
-        return
-
-    category = categories[category_index]
-    category_ua = category["category_ua"]
-
-    await state.update_data(category_ua=category_ua)
-    await state.set_state(BookingState.choosing_service)
-
-    language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    services = await get_services_by_master_and_category(master_id, category_ua)
-
-    if not services:
-        await callback.message.answer("У цій категорії поки що немає послуг.")
-        await callback.answer()
-        return
-
-    await callback.message.answer(
-        texts["choose_service"],
-        reply_markup=services_keyboard(services, language),
-    )
-
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("select_service:"))
-async def select_service_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    service_id = int(callback.data.split(":")[1])
-
-    data = await state.get_data()
-    selected_services = data.get("selected_services", [])
-
-    service = await get_service_by_id(service_id)
-
-    current_service = {
-        "master_id": data["master_id"],
-        "service_id": service_id,
-        "category_ua": data["category_ua"],
-        "price": service["price"],
-        "duration": service["duration"],
-        "extras": [],
-    }
-
+    master_id = int(callback.data.split(":", 1)[1])
     await state.update_data(
-        service_id=service_id,
-        selected_extras=[],
-        current_service=current_service,
+        master_id=master_id,
+        selected_service_ids=[],
+        selected_extra_ids=[],
+        selected_services=[],
     )
 
     language = await get_user_language(callback.from_user.id)
-
-    extras = await get_service_extras_by_category(
-        master_id=data["master_id"],
-        category_ua=data["category_ua"],
-    )
-
-    if extras:
-        await state.set_state(BookingState.choosing_extras)
-
-        text = (
-            "➕ Escolha serviços adicionais:"
-            if language == "pt"
-            else "➕ Оберіть додаткові послуги:"
-        )
-
-        await callback.message.answer(
-            text,
-            reply_markup=extras_keyboard(extras, [], language),
-        )
-    else:
-        selected_services.append(current_service)
-
-        await state.update_data(
-            selected_services=selected_services,
-            current_service=None,
-        )
-
-        text = (
-            "Deseja adicionar outro serviço?"
-            if language == "pt"
-            else "Бажаєте додати ще одну процедуру?"
-        )
-
-        await callback.message.answer(
-            text,
-            reply_markup=add_another_service_keyboard(language),
-        )
-
+    await send_gender_choice(callback.message, state, language)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("toggle_extra:"))
-async def toggle_extra_handler(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("select_gender:"))
+async def select_gender_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    extra_id = int(callback.data.split(":")[1])
+    gender = callback.data.split(":", 1)[1]
+    await state.update_data(gender=gender)
+    language = await get_user_language(callback.from_user.id)
+    await send_service_checklist(callback.message, state, language)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("toggle_service:"))
+async def toggle_service_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
+
+    service_id = int(callback.data.split(":", 1)[1])
+    data = await state.get_data()
+    selected = data.get("selected_service_ids", [])
+
+    if service_id in selected:
+        selected.remove(service_id)
+    else:
+        selected.append(service_id)
+
+    await state.update_data(selected_service_ids=selected)
+    language = await get_user_language(callback.from_user.id)
+
+    services, extras = await get_catalog(data["master_id"], data["gender"])
+    await callback.message.edit_reply_markup(
+        reply_markup=services_checklist_keyboard(
+            services,
+            extras,
+            selected,
+            data.get("selected_extra_ids", []),
+            language,
+        )
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("toggle_catalog_extra:"))
+async def toggle_catalog_extra_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
+
+    extra_id = int(callback.data.split(":", 1)[1])
+    data = await state.get_data()
+    selected = data.get("selected_extra_ids", [])
+
+    if extra_id in selected:
+        selected.remove(extra_id)
+    else:
+        selected.append(extra_id)
+
+    await state.update_data(selected_extra_ids=selected)
+    language = await get_user_language(callback.from_user.id)
+
+    services, extras = await get_catalog(data["master_id"], data["gender"])
+    await callback.message.edit_reply_markup(
+        reply_markup=services_checklist_keyboard(
+            services,
+            extras,
+            data.get("selected_service_ids", []),
+            selected,
+            language,
+        )
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "services_continue")
+async def services_continue_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
 
     data = await state.get_data()
-    current_service = data.get("current_service")
-    selected_services = data.get("selected_services", [])
-
-    extra = await get_extra_by_id(extra_id)
-
-    if extra:
-        current_service["extras"] = [
-            {
-                "id": extra["id"],
-                "name_ua": extra["name_ua"],
-                "name_pt": extra["name_pt"],
-                "price": extra["price"],
-                "duration": extra["duration"],
-            }
-        ]
-    else:
-        current_service["extras"] = []
-
-    selected_services.append(current_service)
-
-    await state.update_data(
-        selected_services=selected_services,
-        current_service=None,
-        selected_extras=[extra_id],
-    )
-
     language = await get_user_language(callback.from_user.id)
+    selected_services, orphan_extras = await build_selected_services_from_state(data)
+
+    if not selected_services:
+        text = (
+            "Selecione pelo menos um serviço."
+            if language == "pt"
+            else "Оберіть хоча б одну основну послугу."
+        )
+        await callback.answer(text, show_alert=True)
+        return
+
+    if orphan_extras:
+        text = (
+            "Para um adicional, selecione também o serviço principal correspondente."
+            if language == "pt"
+            else "Для додаткової послуги оберіть також відповідну основну процедуру."
+        )
+        await callback.answer(text, show_alert=True)
+        return
+
+    await state.update_data(selected_services=selected_services)
+    await state.set_state(BookingState.choosing_additional_service)
 
     text = (
         "Deseja adicionar outro serviço?"
         if language == "pt"
-        else "Бажаєте додати ще одну процедуру?"
+        else "Бажаєте додати ще одну послугу?"
     )
-
-    await callback.message.answer(
-        text,
-        reply_markup=add_another_service_keyboard(language),
-    )
-
-    await callback.answer()
-
-
-@router.callback_query(F.data == "extras_skip")
-async def extras_skip_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
-
-    data = await state.get_data()
-    current_service = data.get("current_service")
-    selected_services = data.get("selected_services", [])
-
-    language = await get_user_language(callback.from_user.id)
-
-    if not current_service:
-        await callback.answer(
-            "Послуга вже додана. Натисніть «Продовжити запис».",
-            show_alert=True,
-        )
-        return
-
-    current_service["extras"] = []
-    selected_services.append(current_service)
-
-    await state.update_data(
-        selected_services=selected_services,
-        current_service=None,
-        selected_extras=[],
-    )
-
-    text = (
-        "Deseja adicionar outro serviço?"
-        if language == "pt"
-        else "Бажаєте додати ще одну процедуру?"
-    )
-
-    await callback.message.answer(
-        text,
-        reply_markup=add_another_service_keyboard(language),
-    )
-
+    await callback.message.answer(text, reply_markup=add_more_keyboard(language))
     await callback.answer()
 
 
@@ -714,17 +931,7 @@ async def add_another_service_handler(callback: CallbackQuery, state: FSMContext
         return
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    masters = await get_active_masters()
-
-    await state.set_state(BookingState.choosing_master)
-
-    await callback.message.answer(
-        texts["choose_master"],
-        reply_markup=masters_keyboard(masters, language),
-    )
-
+    await send_gender_choice(callback.message, state, language)
     await callback.answer()
 
 
@@ -734,15 +941,29 @@ async def continue_booking_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
+    await send_calendar(callback.message, state, language)
+    await callback.answer()
 
-    await state.set_state(BookingState.choosing_date)
 
-    await callback.message.answer(
-        texts["choose_date"],
-        reply_markup=dates_keyboard(language),
+@router.callback_query(F.data.startswith("calendar_month:"))
+async def calendar_month_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
+
+    _, year, month = callback.data.split(":")
+    language = await get_user_language(callback.from_user.id)
+    data = await state.get_data()
+    master = await get_master_by_id(data["master_id"])
+
+    await callback.message.edit_reply_markup(
+        reply_markup=await calendar_keyboard(
+            master,
+            data["selected_services"],
+            int(year),
+            int(month),
+            language,
+        )
     )
-
     await callback.answer()
 
 
@@ -751,68 +972,62 @@ async def select_date_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    selected_date = callback.data.split(":")[1]
+    selected_date = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    master = await get_master_by_id(data["master_id"])
+    times = await get_available_times(master, data["selected_services"], selected_date)
+    language = await get_user_language(callback.from_user.id)
+
+    if not times:
+        text = (
+            "Já não existem horários livres neste dia."
+            if language == "pt"
+            else "На цей день вільних годин уже немає."
+        )
+        await callback.answer(text, show_alert=True)
+        return
 
     await state.update_data(date=selected_date)
     await state.set_state(BookingState.choosing_time)
-
-    data = await state.get_data()
-    selected_services = data.get("selected_services", [])
-
-    language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    waiting_text = (
-        "⏳ Só um instante...\nEstou verificando os horários disponíveis. ✨"
-        if language == "pt"
-        else "⏳ Одну хвилинку...\nПеревіряю вільні годинки для запису. ✨"
-    )
-
-    await callback.message.answer(waiting_text)
-
-    first_item = selected_services[0]
-    master = await get_master_by_id(first_item["master_id"])
-    first_service = await get_service_by_id(first_item["service_id"])
-
-    total_duration = 0
-
-    for item in selected_services:
-        service = await get_service_by_id(item["service_id"])
-        total_duration += service["duration"]
-
-        if item.get("extras"):
-            total_duration += sum(
-                extra.get("duration", 0) for extra in item.get("extras", [])
-            )
-
-    service_for_time = dict(first_service)
-    service_for_time["duration"] = total_duration
-
-    await state.update_data(total_duration=total_duration)
-
-    await callback.message.answer(
-        texts["choose_time"],
-        reply_markup=await times_keyboard(
-            master=master,
-            service=service_for_time,
-            selected_services=selected_services,
-            selected_date=selected_date,
-            language=language,
-        ),
-    )
-
+    text = "🕒 Escolha a hora:" if language == "pt" else "🕒 Оберіть вільний час:"
+    await callback.message.answer(text, reply_markup=times_keyboard(times, language))
     await callback.answer()
 
 
-@router.callback_query(F.data == "no_free_time")
-async def no_free_time_handler(callback: CallbackQuery):
+@router.callback_query(F.data == "nearest_free_time")
+async def nearest_free_time_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    await callback.answer(
-        "На цю дату немає вільного часу. Оберіть іншу дату.",
-        show_alert=True,
+    language = await get_user_language(callback.from_user.id)
+    data = await state.get_data()
+    master = await get_master_by_id(data["master_id"])
+    selected_services = data["selected_services"]
+
+    for offset in range(61):
+        candidate_date = date.today() + timedelta(days=offset)
+        date_str = candidate_date.strftime("%Y-%m-%d")
+        times = await get_available_times(master, selected_services, date_str)
+        if times:
+            await state.update_data(date=date_str)
+            await state.set_state(BookingState.choosing_time)
+            text = (
+                f"⚡ Próxima data disponível: {candidate_date.strftime('%d.%m.%Y')}"
+                if language == "pt"
+                else f"⚡ Найближча вільна дата: {candidate_date.strftime('%d.%m.%Y')}"
+            )
+            await callback.message.answer(
+                text, reply_markup=times_keyboard(times, language)
+            )
+            await callback.answer()
+            return
+
+    text = (
+        "Não encontrei horários livres nos próximos 60 dias."
+        if language == "pt"
+        else "Не знайшла вільного часу на найближчі 60 днів."
     )
+    await callback.answer(text, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("select_time:"))
@@ -821,142 +1036,64 @@ async def select_time_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     selected_time = callback.data.split(":", 1)[1]
-
     await state.update_data(time=selected_time)
-    await state.set_state(BookingState.entering_name)
 
+    user = await get_user_by_telegram_id(callback.from_user.id)
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
 
-    await callback.message.answer(texts["enter_name"])
+    client_name = (
+        user["name"] if user and user["name"] else None
+    ) or callback.from_user.full_name
+    await state.update_data(client_name=client_name)
+
+    if user and user["phone"]:
+        await state.update_data(client_phone=user["phone"])
+        await send_confirmation(callback.message, state, language)
+    else:
+        await state.set_state(BookingState.sharing_phone)
+        text = (
+            "📱 Partilhe o seu número de telefone para confirmar a marcação."
+            if language == "pt"
+            else "📱 Поділіться номером телефону для підтвердження запису."
+        )
+        await callback.message.answer(text, reply_markup=phone_keyboard(language))
 
     await callback.answer()
 
 
-@router.message(BookingState.entering_name)
-async def enter_name_handler(message: Message, state: FSMContext):
+@router.message(BookingState.sharing_phone, F.contact)
+async def receive_phone_handler(message: Message, state: FSMContext):
     if await stop_blocked_message(message):
         return
 
-    await state.update_data(client_name=message.text)
-    await state.set_state(BookingState.entering_phone)
-
-    language = await get_user_language(message.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    await message.answer(texts["enter_phone"])
-
-
-@router.message(BookingState.entering_phone)
-async def enter_phone_handler(message: Message, state: FSMContext):
-    if await stop_blocked_message(message):
-        return
-
-    await state.update_data(client_phone=message.text)
-    await state.set_state(BookingState.confirming_booking)
-
-    data = await state.get_data()
-    language = await get_user_language(message.from_user.id)
-
-    selected_services = data.get("selected_services", [])
-
-    total_price = 0
-    total_duration = 0
-    services_lines = []
-
-    for index, item in enumerate(selected_services, start=1):
-        master = await get_master_by_id(item["master_id"])
-        service = await get_service_by_id(item["service_id"])
-
-        service_name = (
-            service["name_pt"]
-            if language == "pt" and service["name_pt"]
-            else service["name_ua"]
+    if message.contact.user_id and message.contact.user_id != message.from_user.id:
+        language = await get_user_language(message.from_user.id)
+        text = (
+            "Partilhe o seu próprio número."
+            if language == "pt"
+            else "Будь ласка, поділіться саме своїм номером."
         )
+        await message.answer(text)
+        return
 
-        extras = []
-        if item.get("extras"):
-            all_extras = await get_service_extras_by_category(
-                master_id=item["master_id"],
-                category_ua=item["category_ua"],
-            )
+    phone = message.contact.phone_number
+    await update_user_phone(message.from_user.id, phone)
+    await state.update_data(client_phone=phone)
 
-            extras = [
-                extra for extra in all_extras if extra["id"] in item.get("extras", [])
-            ]
+    language = await get_user_language(message.from_user.id)
+    await message.answer("✅", reply_markup=remove_reply_keyboard())
+    await send_confirmation(message, state, language)
 
-        extras_price = sum(extra["price"] for extra in extras)
-        extras_duration = sum(extra["duration"] for extra in extras)
 
-        service_total_price = service["price"] + extras_price
-        service_total_duration = service["duration"] + extras_duration
-
-        total_price += service_total_price
-        total_duration += service_total_duration
-
-        if extras:
-            extras_text = "\n".join(
-                [
-                    f"   ➕ {extra['name_pt'] if language == 'pt' and extra['name_pt'] else extra['name_ua']} — {extra['price']}€"
-                    for extra in extras
-                ]
-            )
-        else:
-            extras_text = (
-                "   Sem adicionais" if language == "pt" else "   Без додаткових послуг"
-            )
-
-        if language == "pt":
-            services_lines.append(
-                f"{index}) 👩 Profissional: {master['name']}\n"
-                f"   💅 Serviço: {service_name} — {service['price']}€\n"
-                f"{extras_text}"
-            )
-        else:
-            services_lines.append(
-                f"{index}) 👩 Майстер: {master['name']}\n"
-                f"   💅 Послуга: {service_name} — {service['price']}€\n"
-                f"{extras_text}"
-            )
-
-    await state.update_data(
-        total_price=total_price,
-        total_duration=total_duration,
+@router.message(BookingState.sharing_phone)
+async def phone_only_by_button_handler(message: Message):
+    language = await get_user_language(message.from_user.id)
+    text = (
+        "Use o botão abaixo para partilhar o número de telefone."
+        if language == "pt"
+        else "Натисніть кнопку нижче, щоб поділитися номером телефону."
     )
-
-    hours = total_duration // 60
-    minutes = total_duration % 60
-
-    if language == "pt":
-        duration_text = f"{hours} h {minutes} min" if minutes else f"{hours} h"
-        services_text = "\n\n".join(services_lines)
-
-        text = (
-            "✅ Verifique os dados da marcação:\n\n"
-            f"👤 Nome: {data['client_name']}\n"
-            f"📞 Telefone: {data['client_phone']}\n\n"
-            f"💅 Serviços escolhidos:\n{services_text}\n\n"
-            f"📅 Data: {data['date']}\n"
-            f"🕒 Hora: {data['time']}\n"
-            f"⏳ Duração total: {duration_text}\n"
-            f"💶 Total: {total_price}€"
-        )
-    else:
-        duration_text = f"{hours} год {minutes} хв" if minutes else f"{hours} год"
-        services_text = "\n\n".join(services_lines)
-
-        text = (
-            "✅ Перевірте дані запису:\n\n"
-            f"👤 Імʼя: {data['client_name']}\n"
-            f"📞 Телефон: {data['client_phone']}\n\n"
-            f"💅 Обрані процедури:\n{services_text}\n\n"
-            f"📅 Дата: {data['date']}\n"
-            f"🕒 Час: {data['time']}\n"
-            f"⏳ Загальна тривалість: {duration_text}\n"
-            f"💶 До оплати: {total_price}€"
-        )
-
-    await message.answer(text, reply_markup=booking_confirm_keyboard(language))
+    await message.answer(text, reply_markup=phone_keyboard(language))
 
 
 @router.callback_query(F.data == "confirm_booking")
@@ -965,16 +1102,13 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     data = await state.get_data()
-
     language = await get_user_language(callback.from_user.id)
     texts, _ = get_texts_and_buttons(language)
-
     user = await get_user_by_telegram_id(callback.from_user.id)
-
     selected_services = data.get("selected_services", [])
 
     if not selected_services:
-        await callback.answer("Помилка: послуги не вибрані", show_alert=True)
+        await callback.answer("Послуги не вибрані", show_alert=True)
         return
 
     booking_id = await create_booking_from_selected_services(
@@ -988,25 +1122,20 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
     )
 
     if not booking_id:
-        await callback.answer(
-            "На жаль, цей час вже зайнятий. Оберіть інший час.",
-            show_alert=True,
+        text = (
+            "Este horário já não está disponível."
+            if language == "pt"
+            else "На жаль, цей час уже зайнятий. Оберіть інший."
         )
+        await callback.answer(text, show_alert=True)
         return
 
-    await notify_master_about_booking(
-        bot=callback.bot,
-        booking_id=booking_id,
-    )
-
+    await notify_master_about_booking(bot=callback.bot, booking_id=booking_id)
     await state.update_data(booking_id=booking_id)
     await state.set_state(BookingState.waiting_master_confirmation)
-
     await callback.message.answer(
-        texts["waiting_confirmation"],
-        reply_markup=main_menu(language),
+        texts["waiting_confirmation"], reply_markup=main_menu(language)
     )
-
     await callback.answer()
 
 
@@ -1016,17 +1145,8 @@ async def change_booking_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    masters = await get_active_masters()
-
-    await state.set_state(BookingState.choosing_master)
-
-    await callback.message.answer(
-        texts["choose_master"],
-        reply_markup=masters_keyboard(masters, language),
-    )
-
+    await state.clear()
+    await send_masters(callback.message, state, language)
     await callback.answer()
 
 
@@ -1036,17 +1156,17 @@ async def back_to_masters_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
+    await send_masters(callback.message, state, language)
+    await callback.answer()
 
-    masters = await get_active_masters()
 
-    await state.set_state(BookingState.choosing_master)
+@router.callback_query(F.data == "back_to_gender")
+async def back_to_gender_handler(callback: CallbackQuery, state: FSMContext):
+    if await stop_blocked_callback(callback):
+        return
 
-    await callback.message.answer(
-        texts["choose_master"],
-        reply_markup=masters_keyboard(masters, language),
-    )
-
+    language = await get_user_language(callback.from_user.id)
+    await send_gender_choice(callback.message, state, language)
     await callback.answer()
 
 
@@ -1055,23 +1175,8 @@ async def back_to_services_handler(callback: CallbackQuery, state: FSMContext):
     if await stop_blocked_callback(callback):
         return
 
-    data = await state.get_data()
-
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    services = await get_services_by_master_and_category(
-        data["master_id"],
-        data["category_ua"],
-    )
-
-    await state.set_state(BookingState.choosing_service)
-
-    await callback.message.answer(
-        texts["choose_service"],
-        reply_markup=services_keyboard(services, language),
-    )
-
+    await send_service_checklist(callback.message, state, language)
     await callback.answer()
 
 
@@ -1081,15 +1186,7 @@ async def back_to_dates_handler(callback: CallbackQuery, state: FSMContext):
         return
 
     language = await get_user_language(callback.from_user.id)
-    texts, _ = get_texts_and_buttons(language)
-
-    await state.set_state(BookingState.choosing_date)
-
-    await callback.message.answer(
-        texts["choose_date"],
-        reply_markup=dates_keyboard(language),
-    )
-
+    await send_calendar(callback.message, state, language)
     await callback.answer()
 
 
@@ -1097,35 +1194,20 @@ async def back_to_dates_handler(callback: CallbackQuery, state: FSMContext):
 async def back_main_handler(callback: CallbackQuery, state: FSMContext):
     language = await get_user_language(callback.from_user.id)
     texts, _ = get_texts_and_buttons(language)
-
     await state.clear()
-
     await callback.message.answer(texts["main_menu"], reply_markup=main_menu(language))
-
     await callback.answer()
 
 
-@router.callback_query(F.data == "back_to_categories")
-async def back_to_categories_handler(callback: CallbackQuery, state: FSMContext):
-    if await stop_blocked_callback(callback):
-        return
+@router.callback_query(F.data == "noop")
+async def noop_handler(callback: CallbackQuery):
+    await callback.answer()
 
-    data = await state.get_data()
 
+@router.callback_query(F.data.startswith("legacy_category:"))
+async def legacy_category_handler(callback: CallbackQuery, state: FSMContext):
+    # Тимчасова сумісність зі старим profile.py: переводимо користувача
+    # на новий вибір Жіночі / Чоловічі.
     language = await get_user_language(callback.from_user.id)
-
-    categories = await get_service_categories_by_master(data["master_id"])
-
-    await state.set_state(BookingState.choosing_category)
-
-    if language == "pt":
-        message_text = "💅 Escolha uma categoria:"
-    else:
-        message_text = "💅 Оберіть категорію послуги:"
-
-    await callback.message.answer(
-        message_text,
-        reply_markup=service_categories_keyboard(categories, language),
-    )
-
+    await send_gender_choice(callback.message, state, language)
     await callback.answer()

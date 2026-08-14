@@ -55,6 +55,8 @@ TEXTS = {
     "services": "💅 Наші послуги\n\nТут буде список послуг з описом, ціною та тривалістю.",
     "masters": "👩 Оберіть майстра, щоб переглянути інформацію:",
     "master_card": "🌸 {master_name}\n\n{description}",
+    "my_bookings": "📋 Ваші активні записи:",
+    "no_bookings": "У вас поки немає активних записів 🌸",
     "contacts": (
         "📍 ZoYA Nails Studio\n\n"
         "Адреса:\n"
@@ -83,6 +85,7 @@ BUTTONS = {
     "services": "💅 Послуги",
     "masters": "👩 Наші майстри",
     "contacts": "📍 Контакти",
+    "my_bookings": "📋 Мої записи",
     "rules_accept": "✅ Ознайомилась / Ознайомився",
     "back": "⬅️ Назад",
     "main_menu": "🏠 Головне меню",

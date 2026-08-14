@@ -1,71 +1,84 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import (
-    Message,
     CallbackQuery,
-    InlineKeyboardMarkup,
     InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
 )
 
 from database.queries import (
     add_user,
-    update_user_language,
-    get_user_by_telegram_id,
     get_all_services,
+    get_user_by_telegram_id,
+    update_user_language,
 )
-
 from keyboards.menus import language_menu, main_menu
-
-from locales.ua import TEXTS as UA_TEXTS
-from locales.ua import BUTTONS as UA_BUTTONS
-
-from locales.pt import TEXTS as PT_TEXTS
 from locales.pt import BUTTONS as PT_BUTTONS
+from locales.pt import TEXTS as PT_TEXTS
+from locales.ua import BUTTONS as UA_BUTTONS
+from locales.ua import TEXTS as UA_TEXTS
 
 router = Router()
 
 
-def public_service_categories_keyboard(language: str = "ua"):
+def public_service_gender_keyboard(language: str = "ua"):
     if language == "pt":
-        categories = [
-            ("💅 Manicure feminina", "wm"),
-            ("👣 Pedicure feminina", "wp"),
-            ("🧔 Manicure e pedicure masculina", "ms"),
-        ]
+        female_text = "👩 Serviços femininos"
+        male_text = "👨 Serviços masculinos"
         back_text = PT_BUTTONS["back"]
     else:
-        categories = [
-            ("💅 Манікюр жіночий", "wm"),
-            ("👣 Педикюр жіночий", "wp"),
-            ("🧔 Чоловічий манікюр та педикюр", "ms"),
-        ]
+        female_text = "👩 Жіночі послуги"
+        male_text = "👨 Чоловічі послуги"
         back_text = UA_BUTTONS["back"]
 
-    keyboard = []
-
-    for title, category_key in categories:
-        keyboard.append(
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=title,
-                    callback_data=f"public_services_cat:{category_key}",
+                    text=female_text,
+                    callback_data="public_services_gender:female",
                 )
-            ]
-        )
-
-    keyboard.append(
-        [
-            InlineKeyboardButton(
-                text=back_text,
-                callback_data=f"public_services_back:{language}",
-            )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=male_text,
+                    callback_data="public_services_gender:male",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=back_text,
+                    callback_data="public_services_back",
+                )
+            ],
         ]
     )
 
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def is_male_service(service) -> bool:
+    text = " ".join(
+        str(value or "").lower()
+        for value in (
+            service["category_ua"],
+            service["category_pt"],
+            service["name_ua"],
+            service["name_pt"],
+        )
+    )
+
+    markers = (
+        "чолов",
+        "муж",
+        "mascul",
+        "homem",
+    )
+
+    return any(marker in text for marker in markers)
 
 
 def format_duration(duration: int, language: str = "ua"):
+    duration = int(duration or 0)
     hours = duration // 60
     minutes = duration % 60
 
@@ -94,31 +107,44 @@ async def start_handler(message: Message):
             role="client",
         )
 
-    await message.answer(UA_TEXTS["choose_language"], reply_markup=language_menu())
+    await message.answer(
+        UA_TEXTS["choose_language"],
+        reply_markup=language_menu(),
+    )
 
 
 @router.message(F.text == UA_BUTTONS["ua"])
 async def choose_ua(message: Message):
     await update_user_language(message.from_user.id, "ua")
-
-    await message.answer(UA_TEXTS["main_menu"], reply_markup=main_menu("ua"))
+    await message.answer(
+        UA_TEXTS["main_menu"],
+        reply_markup=main_menu("ua"),
+    )
 
 
 @router.message(F.text == UA_BUTTONS["pt"])
 async def choose_pt(message: Message):
     await update_user_language(message.from_user.id, "pt")
-
-    await message.answer(PT_TEXTS["main_menu"], reply_markup=main_menu("pt"))
+    await message.answer(
+        PT_TEXTS["main_menu"],
+        reply_markup=main_menu("pt"),
+    )
 
 
 @router.message(F.text == UA_BUTTONS["main_menu"])
 async def ua_main_menu(message: Message):
-    await message.answer(UA_TEXTS["main_menu"], reply_markup=main_menu("ua"))
+    await message.answer(
+        UA_TEXTS["main_menu"],
+        reply_markup=main_menu("ua"),
+    )
 
 
 @router.message(F.text == PT_BUTTONS["main_menu"])
 async def pt_main_menu(message: Message):
-    await message.answer(PT_TEXTS["main_menu"], reply_markup=main_menu("pt"))
+    await message.answer(
+        PT_TEXTS["main_menu"],
+        reply_markup=main_menu("pt"),
+    )
 
 
 @router.message(F.text.in_([UA_BUTTONS["services"], PT_BUTTONS["services"]]))
@@ -126,31 +152,19 @@ async def public_services_handler(message: Message):
     user = await get_user_by_telegram_id(message.from_user.id)
     language = user["language"] if user and user["language"] else "ua"
 
-    text = (
-        "💅 Оберіть категорію послуг:"
-        if language == "ua"
-        else "💅 Escolha uma categoria de serviços:"
-    )
+    text = "💅 Оберіть послуги:" if language == "ua" else "💅 Escolha os serviços:"
 
     await message.answer(
         text,
-        reply_markup=public_service_categories_keyboard(language),
+        reply_markup=public_service_gender_keyboard(language),
     )
 
 
-@router.callback_query(F.data.startswith("public_services_cat:"))
-async def public_services_category_handler(callback: CallbackQuery):
-    category_key = callback.data.split(":", 1)[1]
+@router.callback_query(F.data.startswith("public_services_gender:"))
+async def public_services_gender_handler(callback: CallbackQuery):
+    gender = callback.data.split(":", 1)[1]
 
-    categories_map = {
-        "wm": "Манікюр жіночий",
-        "wp": "Педикюр жіночий",
-        "ms": "Чоловічий манікюр та педикюр",
-    }
-
-    category_ua = categories_map.get(category_key)
-
-    if not category_ua:
+    if gender not in {"female", "male"}:
         await callback.answer("Категорію не знайдено", show_alert=True)
         return
 
@@ -159,9 +173,14 @@ async def public_services_category_handler(callback: CallbackQuery):
 
     services = await get_all_services()
 
-    filtered_services = [
-        service for service in services if service["category_ua"] == category_ua
-    ]
+    if gender == "male":
+        filtered_services = [
+            service for service in services if is_male_service(service)
+        ]
+    else:
+        filtered_services = [
+            service for service in services if not is_male_service(service)
+        ]
 
     if not filtered_services:
         text = (
@@ -169,11 +188,20 @@ async def public_services_category_handler(callback: CallbackQuery):
             if language == "ua"
             else "Ainda não há serviços nesta categoria."
         )
-        await callback.message.answer(text)
+        await callback.message.answer(
+            text,
+            reply_markup=public_service_gender_keyboard(language),
+        )
         await callback.answer()
         return
 
-    title = "💅 Serviços:" if language == "pt" else "💅 Послуги:"
+    if language == "pt":
+        title = (
+            "👨 Serviços masculinos:" if gender == "male" else "👩 Serviços femininos:"
+        )
+    else:
+        title = "👨 Чоловічі послуги:" if gender == "male" else "👩 Жіночі послуги:"
+
     lines = [title, ""]
 
     for service in filtered_services:
@@ -198,18 +226,21 @@ async def public_services_category_handler(callback: CallbackQuery):
         lines.append(f"⏳ {format_duration(service['duration'], language)}")
         lines.append("")
 
-    await callback.message.answer("\n".join(lines))
+    await callback.message.answer(
+        "\n".join(lines),
+        reply_markup=public_service_gender_keyboard(language),
+    )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("public_services_back:"))
+@router.callback_query(F.data == "public_services_back")
 async def public_services_back_handler(callback: CallbackQuery):
-    language = callback.data.split(":")[1]
+    user = await get_user_by_telegram_id(callback.from_user.id)
+    language = user["language"] if user and user["language"] else "ua"
     texts = PT_TEXTS if language == "pt" else UA_TEXTS
 
     await callback.message.answer(
         texts["main_menu"],
         reply_markup=main_menu(language),
     )
-
     await callback.answer()

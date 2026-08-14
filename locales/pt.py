@@ -7,7 +7,7 @@ TEXTS = {
         "📅 Alteração ou cancelamento da marcação\n"
         "Possível até 24 horas antes do início da visita.\n\n"
         "⏰ Atrasos\n"
-        "• mais de 15 minutos — a mestre não pode garantir a realização completa do serviço;\n"
+        "• mais de 15 minutos — a profissional não pode garantir a realização completa do serviço;\n"
         "• 30 minutos ou mais — a marcação pode ser cancelada ou o serviço pode ser feito sem aplicação de verniz/gel;\n"
         "• após três ou mais atrasos, o estúdio pode recusar futuros atendimentos.\n\n"
         "❌ Falta de comparência ou cancelamento em cima da hora\n"
@@ -55,6 +55,8 @@ TEXTS = {
     "services": "💅 Os nossos serviços\n\nAqui estará a lista de serviços com descrição, preço e duração.",
     "masters": "👩 Escolha a profissional para ver as informações:",
     "master_card": "🌸 {master_name}\n\n{description}",
+    "my_bookings": "📋 As suas marcações ativas:",
+    "no_bookings": "Ainda não tem marcações ativas 🌸",
     "contacts": (
         "📍 ZoYA Nails Studio\n\n"
         "Morada:\n"
@@ -83,6 +85,7 @@ BUTTONS = {
     "services": "💅 Serviços",
     "masters": "👩 Profissionais",
     "contacts": "📍 Contactos",
+    "my_bookings": "📋 As minhas marcações",
     "rules_accept": "✅ Li e concordo",
     "back": "⬅️ Voltar",
     "main_menu": "🏠 Menu principal",

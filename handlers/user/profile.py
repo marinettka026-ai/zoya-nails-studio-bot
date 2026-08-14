@@ -11,7 +11,6 @@ from database.queries import (
     get_user_by_telegram_id,
     get_active_masters,
     get_all_services,
-    get_service_categories_by_master,
 )
 
 from keyboards.menus import main_menu
@@ -21,12 +20,7 @@ from locales.pt import BUTTONS as PT_BUTTONS, TEXTS as PT_TEXTS
 
 from states.booking_state import BookingState
 
-from handlers.user.booking import (
-    service_categories_keyboard,
-)
-
-router = Router()
-
+from handlers.user.booking import gender_keyboard
 
 router = Router()
 
@@ -288,26 +282,23 @@ async def profile_book_master(callback: CallbackQuery, state: FSMContext):
 
     language = await get_user_language(callback.from_user.id)
 
-    categories = await get_service_categories_by_master(master_id)
-
-    if not categories:
-        await callback.answer(
-            "У майстра поки немає послуг",
-            show_alert=True,
-        )
-        return
-
-    await state.update_data(master_id=master_id)
-    await state.set_state(BookingState.choosing_category)
+    await state.clear()
+    await state.update_data(
+        master_id=master_id,
+        selected_service_ids=[],
+        selected_extra_ids=[],
+        selected_services=[],
+    )
+    await state.set_state(BookingState.choosing_gender)
 
     if language == "pt":
-        text = "💅 Escolha uma categoria:"
+        text = "💅 Escolha o tipo de serviços:"
     else:
-        text = "💅 Оберіть категорію послуги:"
+        text = "💅 Оберіть тип послуг:"
 
     await callback.message.answer(
         text,
-        reply_markup=service_categories_keyboard(categories, language),
+        reply_markup=gender_keyboard(language),
     )
 
     await callback.answer()

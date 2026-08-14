@@ -67,6 +67,19 @@ async def update_user_language(telegram_id: int, language: str):
         await db.commit()
 
 
+async def update_user_phone(telegram_id: int, phone: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            UPDATE users
+            SET phone = ?
+            WHERE telegram_id = ?
+            """,
+            (phone, telegram_id),
+        )
+        await db.commit()
+
+
 async def accept_rules(telegram_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
@@ -497,6 +510,51 @@ async def get_past_bookings():
         """)
 
         return await cursor.fetchall()
+
+
+async def get_bookings_for_reminder(window_start: str, window_end: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                bookings.id AS booking_id,
+                bookings.client_name,
+                bookings.client_phone,
+                bookings.date,
+                bookings.time,
+                bookings.total_price,
+                bookings.total_duration,
+                users.telegram_id AS client_telegram_id,
+                users.language AS client_language,
+                masters.name AS master_name
+            FROM bookings
+            JOIN users ON bookings.client_id = users.id
+            JOIN masters ON bookings.master_id = masters.id
+            WHERE bookings.status = 'confirmed'
+              AND COALESCE(bookings.reminder_sent, 0) = 0
+              AND datetime(bookings.date || ' ' || bookings.time) >= datetime(?)
+              AND datetime(bookings.date || ' ' || bookings.time) < datetime(?)
+            ORDER BY bookings.date ASC, bookings.time ASC
+            """,
+            (window_start, window_end),
+        )
+
+        return await cursor.fetchall()
+
+
+async def mark_booking_reminder_sent(booking_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            UPDATE bookings
+            SET reminder_sent = 1
+            WHERE id = ?
+            """,
+            (booking_id,),
+        )
+        await db.commit()
 
 
 async def get_booking_full_info(booking_id: int):
@@ -1569,3 +1627,224 @@ async def create_booking_from_selected_services(
 
         await db.commit()
         return booking_id
+
+
+async def get_active_bookings_by_telegram_id(telegram_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                b.id,
+                b.client_id,
+                b.master_id,
+                b.service_id,
+                b.client_name,
+                b.client_phone,
+                b.date,
+                b.time,
+                b.end_time,
+                b.total_price,
+                b.total_duration,
+                b.status,
+                b.payment_status,
+                b.calendar_event_id,
+                m.name AS master_name
+            FROM bookings b
+            JOIN users u ON u.id = b.client_id
+            LEFT JOIN masters m ON m.id = b.master_id
+            WHERE u.telegram_id = ?
+              AND b.status NOT IN ('cancelled', 'rejected', 'completed')
+              AND datetime(b.date || ' ' || b.time) >= datetime('now', 'localtime')
+            ORDER BY b.date ASC, b.time ASC
+            """,
+            (telegram_id,),
+        )
+        return await cursor.fetchall()
+
+
+async def get_booking_selected_services(booking_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                bs.id,
+                bs.booking_id,
+                bs.master_id,
+                bs.service_id,
+                bs.date,
+                bs.start_time,
+                bs.end_time,
+                bs.resource_type,
+                bs.extras,
+                bs.position,
+                bs.price,
+                bs.duration,
+                s.name_ua,
+                s.name_pt
+            FROM booking_services bs
+            JOIN services s ON s.id = bs.service_id
+            WHERE bs.booking_id = ?
+            ORDER BY bs.position ASC
+            """,
+            (booking_id,),
+        )
+        rows = await cursor.fetchall()
+
+    result = []
+
+    for row in rows:
+        item = dict(row)
+        raw_extras = item.get("extras")
+
+        try:
+            extras = json.loads(raw_extras) if raw_extras else []
+        except (TypeError, json.JSONDecodeError):
+            extras = []
+
+        item["extras"] = extras
+        result.append(item)
+
+    return result
+
+
+async def cancel_client_booking(
+    booking_id: int,
+    telegram_id: int,
+) -> bool:
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            UPDATE bookings
+            SET status = 'cancelled',
+                reminder_sent = 0
+            WHERE id = ?
+              AND client_id = (
+                  SELECT id
+                  FROM users
+                  WHERE telegram_id = ?
+              )
+              AND status NOT IN ('cancelled', 'rejected', 'completed')
+            """,
+            (booking_id, telegram_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def reschedule_client_booking(
+    booking_id: int,
+    telegram_id: int,
+    new_date: str,
+    new_time: str,
+) -> bool:
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                b.id,
+                b.total_duration
+            FROM bookings b
+            JOIN users u ON u.id = b.client_id
+            WHERE b.id = ?
+              AND u.telegram_id = ?
+              AND b.status NOT IN ('cancelled', 'rejected', 'completed')
+            """,
+            (booking_id, telegram_id),
+        )
+        booking = await cursor.fetchone()
+
+        if not booking:
+            return False
+
+        cursor = await db.execute(
+            """
+            SELECT
+                id,
+                duration,
+                position
+            FROM booking_services
+            WHERE booking_id = ?
+            ORDER BY position ASC
+            """,
+            (booking_id,),
+        )
+        services = await cursor.fetchall()
+
+        if not services:
+            return False
+
+        current_dt = datetime.strptime(
+            f"{new_date} {new_time}",
+            "%Y-%m-%d %H:%M",
+        )
+
+        for service in services:
+            duration = int(service["duration"] or 0)
+            start_time = current_dt.strftime("%H:%M")
+            end_dt = current_dt + timedelta(minutes=duration)
+            end_time = end_dt.strftime("%H:%M")
+
+            await db.execute(
+                """
+                UPDATE booking_services
+                SET date = ?,
+                    start_time = ?,
+                    end_time = ?
+                WHERE id = ?
+                """,
+                (
+                    new_date,
+                    start_time,
+                    end_time,
+                    service["id"],
+                ),
+            )
+
+            current_dt = end_dt
+
+        await db.execute(
+            """
+            UPDATE bookings
+            SET date = ?,
+                time = ?,
+                end_time = ?,
+                reminder_sent = 0
+            WHERE id = ?
+            """,
+            (
+                new_date,
+                new_time,
+                current_dt.strftime("%H:%M"),
+                booking_id,
+            ),
+        )
+
+        await db.commit()
+        return True
+
+
+async def update_booking_calendar_events(
+    booking_id: int,
+    calendar_events,
+):
+    payload = json.dumps(
+        calendar_events or [],
+        ensure_ascii=False,
+    )
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            UPDATE bookings
+            SET calendar_event_id = ?
+            WHERE id = ?
+            """,
+            (payload, booking_id),
+        )
+        await db.commit()
