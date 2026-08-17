@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from google.oauth2 import service_account
@@ -33,9 +33,39 @@ def build_datetime(
         f"{date} {time}",
         "%Y-%m-%d %H:%M",
     )
+
     return naive_dt.replace(
         tzinfo=ZoneInfo(timezone),
     )
+
+
+def _parse_google_event_datetime(
+    event_part: dict,
+    timezone: str,
+):
+    tz = ZoneInfo(timezone)
+
+    date_time_value = event_part.get("dateTime")
+
+    if date_time_value:
+        parsed = datetime.fromisoformat(date_time_value.replace("Z", "+00:00"))
+        return parsed.astimezone(tz)
+
+    date_value = event_part.get("date")
+
+    if date_value:
+        parsed_date = datetime.strptime(
+            date_value,
+            "%Y-%m-%d",
+        ).date()
+
+        return datetime.combine(
+            parsed_date,
+            time.min,
+            tzinfo=tz,
+        )
+
+    return None
 
 
 def get_busy_intervals(
@@ -46,48 +76,66 @@ def get_busy_intervals(
     timezone: str = DEFAULT_TIMEZONE,
 ):
     """
-    Отримує всі зайняті інтервали календаря одним запитом
-    за вказаний робочий проміжок дня.
+    Отримує реальні події Google Calendar за потрібний проміжок.
+
+    Будь-яка подія в календарі вважається зайнятим часом,
+    навіть якщо в Google Calendar вона позначена як Free.
     """
     if not calendar_id:
         return []
 
     service = get_calendar_service()
 
-    start_dt = build_datetime(
+    range_start = build_datetime(
         date,
         start_time,
         timezone,
     )
-    end_dt = build_datetime(
+    range_end = build_datetime(
         date,
         end_time,
         timezone,
     )
 
-    body = {
-        "timeMin": start_dt.isoformat(),
-        "timeMax": end_dt.isoformat(),
-        "timeZone": timezone,
-        "items": [{"id": calendar_id}],
-    }
-
-    result = service.freebusy().query(body=body).execute()
-
-    busy_items = result.get("calendars", {}).get(calendar_id, {}).get("busy", [])
+    result = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=range_start.isoformat(),
+            timeMax=range_end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            showDeleted=False,
+            maxResults=2500,
+        )
+        .execute()
+    )
 
     intervals = []
 
-    for item in busy_items:
-        busy_start = datetime.fromisoformat(item["start"].replace("Z", "+00:00"))
-        busy_end = datetime.fromisoformat(item["end"].replace("Z", "+00:00"))
+    for event in result.get("items", []):
+        if event.get("status") == "cancelled":
+            continue
 
-        intervals.append(
-            (
-                busy_start.astimezone(ZoneInfo(timezone)),
-                busy_end.astimezone(ZoneInfo(timezone)),
-            )
+        event_start = _parse_google_event_datetime(
+            event.get("start", {}),
+            timezone,
         )
+        event_end = _parse_google_event_datetime(
+            event.get("end", {}),
+            timezone,
+        )
+
+        if not event_start or not event_end:
+            continue
+
+        if event_start < range_end and event_end > range_start:
+            intervals.append(
+                (
+                    event_start,
+                    event_end,
+                )
+            )
 
     return intervals
 
@@ -99,9 +147,6 @@ def slot_overlaps_busy(
     busy_intervals,
     timezone: str = DEFAULT_TIMEZONE,
 ):
-    """
-    Перевіряє слот локально, без нового запиту до Google.
-    """
     slot_start = build_datetime(
         date,
         time,
@@ -125,25 +170,20 @@ def is_time_free(
     duration: int,
     timezone: str = DEFAULT_TIMEZONE,
 ):
-    """
-    Залишено для сумісності зі старим кодом.
-    Для масової перевірки слотів краще використовувати
-    get_busy_intervals() + slot_overlaps_busy().
-    """
-    start_dt = build_datetime(
+    slot_start = build_datetime(
         date,
         time,
         timezone,
     )
-    end_dt = start_dt + timedelta(
+    slot_end = slot_start + timedelta(
         minutes=duration,
     )
 
     busy_intervals = get_busy_intervals(
         calendar_id=calendar_id,
         date=date,
-        start_time=start_dt.strftime("%H:%M"),
-        end_time=end_dt.strftime("%H:%M"),
+        start_time=slot_start.strftime("%H:%M"),
+        end_time=slot_end.strftime("%H:%M"),
         timezone=timezone,
     )
 
@@ -281,5 +321,12 @@ def delete_calendar_event(
             .execute()
         )
         return True
-    except Exception:
+
+    except Exception as error:
+        print(
+            "GOOGLE CALENDAR DELETE ERROR:",
+            calendar_id,
+            event_id,
+            repr(error),
+        )
         return False
