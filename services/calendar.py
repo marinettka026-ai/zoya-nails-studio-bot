@@ -111,10 +111,23 @@ def get_busy_intervals(
         .execute()
     )
 
+    items = result.get("items", [])
+
+    print("========== GOOGLE CALENDAR DEBUG ==========")
+    print("CALENDAR ID:", calendar_id)
+    print("DATE:", date)
+    print("REQUEST RANGE:", range_start.isoformat(), "->", range_end.isoformat())
+    print("GOOGLE EVENTS FOUND:", len(items))
+
     intervals = []
 
-    for event in result.get("items", []):
+    for event in items:
         if event.get("status") == "cancelled":
+            print(
+                "SKIP CANCELLED EVENT:",
+                event.get("id"),
+                event.get("summary"),
+            )
             continue
 
         event_start = _parse_google_event_datetime(
@@ -124,6 +137,21 @@ def get_busy_intervals(
         event_end = _parse_google_event_datetime(
             event.get("end", {}),
             timezone,
+        )
+
+        print(
+            "EVENT:",
+            event.get("summary"),
+            "| ID:",
+            event.get("id"),
+            "| STATUS:",
+            event.get("status"),
+            "| TRANSPARENCY:",
+            event.get("transparency"),
+            "| START:",
+            event_start,
+            "| END:",
+            event_end,
         )
 
         if not event_start or not event_end:
@@ -136,6 +164,11 @@ def get_busy_intervals(
                     event_end,
                 )
             )
+
+    print("BUSY INTERVALS USED:", len(intervals))
+    for busy_start, busy_end in intervals:
+        print("BUSY:", busy_start, "->", busy_end)
+    print("===========================================")
 
     return intervals
 
