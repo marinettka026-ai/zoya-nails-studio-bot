@@ -8,6 +8,7 @@ from config import GOOGLE_SERVICE_ACCOUNT_FILE
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 DEFAULT_TIMEZONE = "Europe/Lisbon"
+_CALENDARS_PRINTED = False
 
 
 def get_calendar_service():
@@ -22,6 +23,54 @@ def get_calendar_service():
         credentials=credentials,
         cache_discovery=False,
     )
+
+
+def print_available_calendars():
+    """
+    Діагностика: показує всі календарі,
+    до яких має доступ service account.
+    """
+    service = get_calendar_service()
+
+    try:
+        result = (
+            service.calendarList()
+            .list(
+                showHidden=True,
+                maxResults=250,
+            )
+            .execute()
+        )
+    except Exception as error:
+        print(
+            "GOOGLE CALENDAR LIST ERROR:",
+            repr(error),
+        )
+        return
+
+    calendars = result.get("items", [])
+
+    print("========== AVAILABLE GOOGLE CALENDARS ==========")
+    print("COUNT:", len(calendars))
+
+    for index, item in enumerate(calendars, start=1):
+        print(
+            f"{index}.",
+            "SUMMARY:",
+            item.get("summary"),
+            "| ID:",
+            item.get("id"),
+            "| PRIMARY:",
+            item.get("primary"),
+            "| ACCESS:",
+            item.get("accessRole"),
+            "| SELECTED:",
+            item.get("selected"),
+            "| HIDDEN:",
+            item.get("hidden"),
+        )
+
+    print("================================================")
 
 
 def build_datetime(
@@ -81,8 +130,14 @@ def get_busy_intervals(
     Будь-яка подія в календарі вважається зайнятим часом,
     навіть якщо в Google Calendar вона позначена як Free.
     """
+    global _CALENDARS_PRINTED
+
     if not calendar_id:
         return []
+
+    if not _CALENDARS_PRINTED:
+        print_available_calendars()
+        _CALENDARS_PRINTED = True
 
     service = get_calendar_service()
 
