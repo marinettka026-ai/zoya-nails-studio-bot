@@ -462,12 +462,38 @@ async def get_available_times(master, selected_services, selected_date: str):
         if not available:
             continue
 
-        if busy_intervals and slot_overlaps_busy(
-            date=selected_date,
-            time=time_str,
-            duration=total_duration,
-            busy_intervals=busy_intervals,
-        ):
+        google_busy = False
+
+        if master["calendar_id"]:
+            google_busy = slot_overlaps_busy(
+                date=selected_date,
+                time=time_str,
+                duration=total_duration,
+                busy_intervals=busy_intervals,
+            )
+
+            print("========== SLOT CHECK ==========")
+            print(
+                "DATE:",
+                selected_date,
+            )
+            print(
+                "SLOT:",
+                time_str,
+                "-",
+                slot_end.strftime("%H:%M"),
+            )
+            print(
+                "GOOGLE BUSY:",
+                google_busy,
+            )
+            print(
+                "GOOGLE INTERVALS:",
+                len(busy_intervals),
+            )
+            print("================================")
+
+        if google_busy:
             continue
 
         available_times.append(time_str)
