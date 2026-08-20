@@ -1,4 +1,3 @@
-import html
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -163,17 +162,17 @@ def compact_service_name(service, language: str = "ua") -> str:
 def public_price_note(language: str = "ua") -> str:
     if language == "pt":
         return (
-            "<b>ℹ️ IMPORTANTE</b>\\n\\n"
+            "<b>ℹ️ IMPORTANTE</b>\n\n"
             "A remoção do revestimento e a reparação de algumas unhas "
-            "dentro do serviço completo não são cobradas à parte.\\n\\n"
+            "dentro do serviço completo não são cobradas à parte.\n\n"
             "Na manicure com verniz gel, dependendo do comprimento das unhas, "
             "pode ser acrescentado +5 €."
         )
 
     return (
-        "<b>ℹ️ ВАЖЛИВО</b>\\n\\n"
+        "<b>ℹ️ ВАЖЛИВО</b>\n\n"
         "Зняття покриття та ремонт декількох нігтів у комплексній послузі "
-        "додатково не оплачуються.\\n\\n"
+        "додатково не оплачуються.\n\n"
         "Для манікюру з гель-лаком залежно від довжини нігтів "
         "може бути додано +5 €."
     )
@@ -440,7 +439,7 @@ async def public_services_master_handler(callback: CallbackQuery):
         lines.append(public_price_note(language))
 
     await callback.message.answer(
-        "\\n".join(lines),
+        "\n".join(lines),
         reply_markup=public_service_back_to_masters_keyboard(language),
         parse_mode="HTML",
     )
