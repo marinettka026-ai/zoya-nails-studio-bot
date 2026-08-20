@@ -17,6 +17,10 @@ from database.queries import (
     delete_master,
     get_services_by_master,
     add_service,
+    update_service,
+    deactivate_service,
+    add_service_extra,
+    get_service_extras_by_category,
 )
 from keyboards.menus import admin_menu
 from locales.ua import BUTTONS as UA_BUTTONS
@@ -773,3 +777,255 @@ async def copy_zoya_services_to_nastya(message: Message):
         f"Скопійовано: {copied}\n"
         f"Пропущено як дублікати: {skipped}"
     )
+
+
+@router.message(F.text == "/update_nastya_price")
+async def update_nastya_price(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    NASTYA_ID = 7
+
+    nastya = await get_master_by_id(NASTYA_ID)
+    if not nastya:
+        await message.answer("❌ Nastya (ID 7) не знайдена.")
+        return
+
+    services = await get_services_by_master(NASTYA_ID)
+
+    if not services:
+        await message.answer("❌ У Nastya немає активних послуг.")
+        return
+
+    def normalize(value):
+        return (value or "").strip().lower()
+
+    async def update_main_service(
+        service,
+        *,
+        price=None,
+        duration=None,
+        description_ua=None,
+        description_pt=None,
+    ):
+        await update_service(
+            service_id=service["id"],
+            category_ua=service["category_ua"],
+            category_pt=service["category_pt"],
+            name_ua=service["name_ua"],
+            name_pt=service["name_pt"],
+            description_ua=(
+                description_ua
+                if description_ua is not None
+                else service["description_ua"]
+            ),
+            description_pt=(
+                description_pt
+                if description_pt is not None
+                else service["description_pt"]
+            ),
+            price=price if price is not None else service["price"],
+            duration=duration if duration is not None else service["duration"],
+            deposit_amount=(
+                service["deposit_amount"]
+                if service["deposit_amount"] is not None
+                else 0
+            ),
+        )
+
+    updated = []
+    deactivated = []
+    added_extras = []
+    skipped_extras = []
+
+    # --- Основні послуги Nastya ---
+
+    price_updates = {
+        "японський манікюр (p.shine)": 35.0,
+        "частковий педикюр (пальчики) + гель-лак": 45.0,
+        "гігієнічний манікюр": 25.0,
+        "манікюр з покриттям гель-лак": 45.0,
+        "гігієнічний педикюр": 35.0,
+        "педикюр з покриттям гель-лак": 50.0,
+        "чоловічий манікюр": 30.0,
+        "манікюр чоловічий": 30.0,
+        "чоловічий педикюр": 40.0,
+        "педикюр чоловічий": 40.0,
+    }
+
+    complex_note_ua = (
+        "Зняття покриття у комплексі та ремонт декількох нігтів "
+        "враховані у вартість комплексної послуги й додатково не оплачуються."
+    )
+    complex_note_pt = (
+        "A remoção do revestimento dentro do serviço completo e a reparação "
+        "de algumas unhas estão incluídas no valor e não são cobradas à parte."
+    )
+
+    for service in services:
+        name_key = normalize(service["name_ua"])
+
+        if name_key in price_updates:
+            new_description_ua = None
+            new_description_pt = None
+
+            if name_key in {
+                "манікюр з покриттям гель-лак",
+                "педикюр з покриттям гель-лак",
+            }:
+                current_ua = (service["description_ua"] or "").strip()
+                current_pt = (service["description_pt"] or "").strip()
+
+                if complex_note_ua not in current_ua:
+                    new_description_ua = (
+                        f"{current_ua}\n\n{complex_note_ua}"
+                        if current_ua
+                        else complex_note_ua
+                    )
+
+                if complex_note_pt not in current_pt:
+                    new_description_pt = (
+                        f"{current_pt}\n\n{complex_note_pt}"
+                        if current_pt
+                        else complex_note_pt
+                    )
+
+            await update_main_service(
+                service,
+                price=price_updates[name_key],
+                description_ua=new_description_ua,
+                description_pt=new_description_pt,
+            )
+            updated.append(f"{service['name_ua']} → {price_updates[name_key]}€")
+
+        if name_key == "зняття покриття без подальшого покриття":
+            await deactivate_service(service["id"])
+            deactivated.append(service["name_ua"])
+
+    # --- Додаткові послуги Nastya ---
+
+    extras_to_add = [
+        {
+            "category_ua": "Манікюр жіночий",
+            "category_pt": "Manicure feminina",
+            "name_ua": "Дизайн одного нігтя",
+            "name_pt": "Design de uma unha",
+            "price": 0.0,
+            "duration": 0,
+        },
+        {
+            "category_ua": "Манікюр жіночий",
+            "category_pt": "Manicure feminina",
+            "name_ua": "Дизайн на всі нігті",
+            "name_pt": "Design em todas as unhas",
+            "price": 10.0,
+            "duration": 30,
+        },
+        {
+            "category_ua": "Манікюр жіночий",
+            "category_pt": "Manicure feminina",
+            "name_ua": "Френч",
+            "name_pt": "Francesinha",
+            "price": 10.0,
+            "duration": 15,
+        },
+        {
+            "category_ua": "Педикюр жіночий",
+            "category_pt": "Pedicure feminina",
+            "name_ua": "Покриття звичайним лаком",
+            "name_pt": "Aplicação de verniz tradicional",
+            "price": 10.0,
+            "duration": 15,
+        },
+        {
+            "category_ua": "Педикюр жіночий",
+            "category_pt": "Pedicure feminina",
+            "name_ua": "Зняття гель-покриття без подальшого покриття",
+            "name_pt": "Remoção de verniz gel sem nova aplicação",
+            "price": 5.0,
+            "duration": 0,
+        },
+        {
+            "category_ua": "Педикюр жіночий",
+            "category_pt": "Pedicure feminina",
+            "name_ua": "SPA догляд для ніг від Baehr",
+            "name_pt": "Cuidado SPA para os pés Baehr",
+            "price": 10.0,
+            "duration": 20,
+        },
+        {
+            "category_ua": "Чоловічий манікюр та педикюр",
+            "category_pt": "Manicure e pedicure masculina",
+            "name_ua": "SPA догляд від Baehr",
+            "name_pt": "Cuidado SPA Baehr",
+            "price": 10.0,
+            "duration": 20,
+        },
+    ]
+
+    categories = {item["category_ua"] for item in extras_to_add}
+
+    existing_extra_keys = set()
+
+    for category_ua in categories:
+        existing_extras = await get_service_extras_by_category(
+            NASTYA_ID,
+            category_ua,
+        )
+
+        for extra in existing_extras:
+            existing_extra_keys.add(
+                (
+                    normalize(extra["category_ua"]),
+                    normalize(extra["name_ua"]),
+                )
+            )
+
+    for extra in extras_to_add:
+        key = (
+            normalize(extra["category_ua"]),
+            normalize(extra["name_ua"]),
+        )
+
+        if key in existing_extra_keys:
+            skipped_extras.append(extra["name_ua"])
+            continue
+
+        await add_service_extra(
+            master_id=NASTYA_ID,
+            category_ua=extra["category_ua"],
+            category_pt=extra["category_pt"],
+            name_ua=extra["name_ua"],
+            name_pt=extra["name_pt"],
+            price=extra["price"],
+            duration=extra["duration"],
+        )
+
+        existing_extra_keys.add(key)
+        added_extras.append(extra["name_ua"])
+
+    result_lines = [
+        "✅ Прайс Nastya оновлено.",
+        "",
+        f"Основних послуг оновлено: {len(updated)}",
+        f"Основних послуг вимкнено: {len(deactivated)}",
+        f"Додаткових послуг додано: {len(added_extras)}",
+        f"Дублікатів extras пропущено: {len(skipped_extras)}",
+    ]
+
+    if updated:
+        result_lines.append("")
+        result_lines.append("💶 Оновлено:")
+        result_lines.extend(f"• {item}" for item in updated)
+
+    if deactivated:
+        result_lines.append("")
+        result_lines.append("🚫 Вимкнено:")
+        result_lines.extend(f"• {item}" for item in deactivated)
+
+    if added_extras:
+        result_lines.append("")
+        result_lines.append("✨ Додано:")
+        result_lines.extend(f"• {item}" for item in added_extras)
+
+    await message.answer("\n".join(result_lines))
