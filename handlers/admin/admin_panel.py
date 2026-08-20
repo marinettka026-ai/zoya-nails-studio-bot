@@ -315,6 +315,175 @@ def services_choose_keyboard(services, action: str):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+# ===== НОВЕ ЗРУЧНЕ РЕДАГУВАННЯ ПОСЛУГ =====
+
+
+def edit_service_masters_keyboard(masters):
+    keyboard = []
+
+    for master in masters:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🌸 {master['name']}",
+                    callback_data=f"edit_service_master:{master['id']}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data="back_to_services_menu",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def edit_services_for_master_keyboard(services):
+    keyboard = []
+
+    for service in services:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💅 {service['name_ua']}",
+                    callback_data=f"edit_service:{service['id']}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ До майстрів",
+                callback_data="admin_edit_service",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def edit_service_fields_keyboard(service_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📂 Категорія",
+                    callback_data=f"edit_field:category:{service_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🇺🇦 Назва UA",
+                    callback_data=f"edit_field:name_ua:{service_id}",
+                ),
+                InlineKeyboardButton(
+                    text="🇵🇹 Назва PT",
+                    callback_data=f"edit_field:name_pt:{service_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Опис UA",
+                    callback_data=f"edit_field:description_ua:{service_id}",
+                ),
+                InlineKeyboardButton(
+                    text="📝 Опис PT",
+                    callback_data=f"edit_field:description_pt:{service_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💶 Ціна",
+                    callback_data=f"edit_field:price:{service_id}",
+                ),
+                InlineKeyboardButton(
+                    text="⏳ Тривалість",
+                    callback_data=f"edit_field:duration:{service_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Видалити послугу",
+                    callback_data=f"delete_service:{service_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ До вибору майстра",
+                    callback_data="admin_edit_service",
+                )
+            ],
+        ]
+    )
+
+
+async def update_one_service_field(
+    service_id: int,
+    field: str,
+    value,
+):
+    service = await get_service_by_id(service_id)
+
+    if not service:
+        return False
+
+    values = {
+        "category_ua": service["category_ua"],
+        "category_pt": service["category_pt"],
+        "name_ua": service["name_ua"],
+        "name_pt": service["name_pt"],
+        "description_ua": service["description_ua"],
+        "description_pt": service["description_pt"],
+        "price": service["price"],
+        "duration": service["duration"],
+    }
+
+    values[field] = value
+
+    deposit_amount = service["deposit_amount"]
+    if deposit_amount is None:
+        deposit_amount = DEFAULT_DEPOSIT_AMOUNT
+
+    await update_service(
+        service_id=service_id,
+        category_ua=values["category_ua"],
+        category_pt=values["category_pt"],
+        name_ua=values["name_ua"],
+        name_pt=values["name_pt"],
+        description_ua=values["description_ua"],
+        description_pt=values["description_pt"],
+        price=values["price"],
+        duration=values["duration"],
+        deposit_amount=deposit_amount,
+    )
+
+    return True
+
+
+async def send_service_edit_menu(message: Message, service_id: int):
+    service = await get_service_by_id(service_id)
+
+    if not service:
+        await message.answer("Послугу не знайдено.")
+        return
+
+    await message.answer(
+        "✏️ Редагування послуги\n\n"
+        f"💅 {service['name_ua']}\n"
+        f"📂 {service['category_ua']}\n"
+        f"💶 {service['price']} €\n"
+        f"⏳ {service['duration']} хв\n\n"
+        "Що саме потрібно змінити?",
+        reply_markup=edit_service_fields_keyboard(service_id),
+    )
+
+
 @router.message(Command("admin"))
 async def admin_panel(message: Message):
     print("ADMIN COMMAND FROM:", message.from_user.id)
@@ -336,7 +505,7 @@ async def admin_services_menu(message: Message):
         return
 
     await message.answer(
-        "💅 Управління послугами\n\n" "Оберіть дію:",
+        "💅 Управління послугами\n\nОберіть дію:",
         reply_markup=admin_services_keyboard(),
     )
 
@@ -466,7 +635,7 @@ async def add_service_description_pt(message: Message, state: FSMContext):
     await state.set_state(AddServiceState.price)
 
     await message.answer(
-        "💶 Введіть ціну послуги в євро:\n\n" "Наприклад: 50",
+        "💶 Введіть ціну послуги в євро:\n\nНаприклад: 50",
         reply_markup=back_to_description_pt_keyboard(),
     )
 
@@ -489,7 +658,7 @@ async def add_service_price(message: Message, state: FSMContext):
     await state.set_state(AddServiceState.duration)
 
     await message.answer(
-        "⏳ Введіть тривалість послуги в хвилинах:\n\n" "Наприклад: 90",
+        "⏳ Введіть тривалість послуги в хвилинах:\n\nНаприклад: 90",
         reply_markup=back_to_price_keyboard(),
     )
 
@@ -544,7 +713,7 @@ async def back_to_services_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
     await callback.message.answer(
-        "💅 Управління послугами\n\n" "Оберіть дію:",
+        "💅 Управління послугами\n\nОберіть дію:",
         reply_markup=admin_services_keyboard(),
     )
 
@@ -659,35 +828,80 @@ async def back_to_service_price(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AddServiceState.price)
 
     await callback.message.answer(
-        "💶 Введіть ціну послуги в євро:\n\n" "Наприклад: 50",
+        "💶 Введіть ціну послуги в євро:\n\nНаприклад: 50",
         reply_markup=back_to_description_pt_keyboard(),
     )
 
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin_edit_service")
-async def choose_service_to_edit(callback: CallbackQuery):
-    services = await get_all_services_admin()
+# ===== РЕДАГУВАННЯ ПОСЛУГ: МАЙСТЕР → ПОСЛУГА → ПОЛЕ =====
 
-    if not services:
-        await callback.message.answer("Поки що немає послуг для редагування.")
+
+@router.callback_query(F.data == "admin_edit_service")
+async def choose_service_to_edit(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+
+    await state.clear()
+
+    masters = await get_active_masters()
+
+    if not masters:
+        await callback.message.answer("Поки що немає активних майстрів.")
         await callback.answer()
         return
 
     await callback.message.answer(
-        "✏️ Оберіть послугу для редагування:",
-        reply_markup=services_choose_keyboard(
-            services,
-            "edit_service",
-        ),
+        "✏️ Редагування послуги\n\nСпочатку оберіть майстра:",
+        reply_markup=edit_service_masters_keyboard(masters),
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("edit_service_master:"))
+async def choose_master_for_service_edit(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+
+    master_id = int(callback.data.split(":")[1])
+
+    all_services = await get_all_services_admin()
+    services = [
+        service for service in all_services if service["master_id"] == master_id
+    ]
+
+    if not services:
+        await callback.message.answer(
+            "У цього майстра поки немає послуг.",
+            reply_markup=edit_service_masters_keyboard(await get_active_masters()),
+        )
+        await callback.answer()
+        return
+
+    await callback.message.answer(
+        "💅 Оберіть послугу:",
+        reply_markup=edit_services_for_master_keyboard(services),
     )
 
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("edit_service:"))
-async def start_edit_service(callback: CallbackQuery, state: FSMContext):
+async def start_edit_service(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+
     service_id = int(callback.data.split(":")[1])
     service = await get_service_by_id(service_id)
 
@@ -697,20 +911,106 @@ async def start_edit_service(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await state.update_data(service_id=service_id)
-    await state.set_state(EditServiceState.category)
+    await state.set_state(EditServiceState.service)
 
-    await callback.message.answer(
-        "✏️ Редагування послуги\n\n"
-        f"Поточна категорія: {service['category_ua']}\n\n"
-        "Оберіть нову категорію або натисніть поточну:",
-        reply_markup=edit_service_categories_keyboard(),
-    )
+    await send_service_edit_menu(callback.message, service_id)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("edit_field:"))
+async def choose_service_field(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+
+    _, field, service_id_raw = callback.data.split(":")
+    service_id = int(service_id_raw)
+
+    service = await get_service_by_id(service_id)
+
+    if not service:
+        await callback.answer("Послугу не знайдено", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(service_id=service_id)
+
+    if field == "category":
+        await state.set_state(EditServiceState.category)
+        await callback.message.answer(
+            "📂 Поточна категорія:\n"
+            f"{service['category_ua']}\n\n"
+            "Оберіть нову категорію:",
+            reply_markup=edit_service_categories_keyboard(),
+        )
+
+    elif field == "name_ua":
+        await state.set_state(EditServiceState.name_ua)
+        await callback.message.answer(
+            "🇺🇦 Поточна назва:\n" f"{service['name_ua']}\n\n" "Введіть нову назву:"
+        )
+
+    elif field == "name_pt":
+        await state.set_state(EditServiceState.name_pt)
+        await callback.message.answer(
+            "🇵🇹 Поточна назва:\n" f"{service['name_pt']}\n\n" "Введіть нову назву:"
+        )
+
+    elif field == "description_ua":
+        await state.set_state(EditServiceState.description_ua)
+        await callback.message.answer(
+            "🇺🇦 Поточний опис:\n"
+            f"{service['description_ua']}\n\n"
+            "Введіть новий опис:"
+        )
+
+    elif field == "description_pt":
+        await state.set_state(EditServiceState.description_pt)
+        await callback.message.answer(
+            "🇵🇹 Поточний опис:\n"
+            f"{service['description_pt']}\n\n"
+            "Введіть новий опис:"
+        )
+
+    elif field == "price":
+        await state.set_state(EditServiceState.price)
+        await callback.message.answer(
+            f"💶 Поточна ціна: {service['price']} €\n\n" "Введіть нову ціну:"
+        )
+
+    elif field == "duration":
+        await state.set_state(EditServiceState.duration)
+        await callback.message.answer(
+            "⏳ Поточна тривалість: "
+            f"{service['duration']} хв\n\n"
+            "Введіть нову тривалість у хвилинах:"
+        )
 
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("edit_sc:"))
-async def edit_service_category(callback: CallbackQuery, state: FSMContext):
+async def edit_service_category(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await callback.answer(
+            "Сесію редагування втрачено.",
+            show_alert=True,
+        )
+        return
+
     category_key = callback.data.split(":")[1]
     category = SERVICE_CATEGORIES.get(category_key)
 
@@ -718,152 +1018,217 @@ async def edit_service_category(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Категорію не знайдено", show_alert=True)
         return
 
-    await state.update_data(
-        category_ua=category["ua"],
-        category_pt=category["pt"],
-    )
+    service = await get_service_by_id(service_id)
 
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
+    if not service:
+        await callback.answer("Послугу не знайдено", show_alert=True)
+        return
 
-    await state.set_state(EditServiceState.name_ua)
-
-    await callback.message.answer(
-        f"🇺🇦 Поточна назва українською:\n{service['name_ua']}\n\n"
-        "Введіть нову назву або напишіть: залишити"
-    )
-
-    await callback.answer()
-
-
-@router.message(EditServiceState.name_ua)
-async def edit_service_name_ua(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
-
-    name_ua = service["name_ua"] if message.text.lower() == "залишити" else message.text
-
-    await state.update_data(name_ua=name_ua)
-    await state.set_state(EditServiceState.name_pt)
-
-    await message.answer(
-        f"🇵🇹 Поточна назва португальською:\n{service['name_pt']}\n\n"
-        "Введіть нову назву або напишіть: залишити"
-    )
-
-
-@router.message(EditServiceState.name_pt)
-async def edit_service_name_pt(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
-
-    name_pt = service["name_pt"] if message.text.lower() == "залишити" else message.text
-
-    await state.update_data(name_pt=name_pt)
-    await state.set_state(EditServiceState.description_ua)
-
-    await message.answer(
-        f"🇺🇦 Поточний опис українською:\n{service['description_ua']}\n\n"
-        "Введіть новий опис або напишіть: залишити"
-    )
-
-
-@router.message(EditServiceState.description_ua)
-async def edit_service_description_ua(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
-
-    description_ua = (
-        service["description_ua"]
-        if message.text.lower() == "залишити"
-        else message.text
-    )
-
-    await state.update_data(description_ua=description_ua)
-    await state.set_state(EditServiceState.description_pt)
-
-    await message.answer(
-        f"🇵🇹 Поточний опис португальською:\n{service['description_pt']}\n\n"
-        "Введіть новий опис або напишіть: залишити"
-    )
-
-
-@router.message(EditServiceState.description_pt)
-async def edit_service_description_pt(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
-
-    description_pt = (
-        service["description_pt"]
-        if message.text.lower() == "залишити"
-        else message.text
-    )
-
-    await state.update_data(description_pt=description_pt)
-    await state.set_state(EditServiceState.price)
-
-    await message.answer(
-        f"💶 Поточна ціна: {service['price']}€\n\n"
-        "Введіть нову ціну або напишіть: залишити"
-    )
-
-
-@router.message(EditServiceState.price)
-async def edit_service_price(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
-
-    if message.text.lower() == "залишити":
-        price = service["price"]
-    else:
-        try:
-            price = float(message.text.replace(",", "."))
-        except ValueError:
-            await message.answer("Введіть ціну числом або напишіть: залишити")
-            return
-
-    await state.update_data(price=price)
-    await state.set_state(EditServiceState.duration)
-
-    await message.answer(
-        f"⏳ Поточна тривалість: {service['duration']} хв\n\n"
-        "Введіть нову тривалість або напишіть: залишити"
-    )
-
-
-@router.message(EditServiceState.duration)
-async def edit_service_duration(message: Message, state: FSMContext):
-    data = await state.get_data()
-    service = await get_service_by_id(data["service_id"])
-
-    if message.text.lower() == "залишити":
-        duration = service["duration"]
-    else:
-        try:
-            duration = int(message.text)
-        except ValueError:
-            await message.answer("Введіть тривалість числом або напишіть: залишити")
-            return
+    deposit_amount = service["deposit_amount"]
+    if deposit_amount is None:
+        deposit_amount = DEFAULT_DEPOSIT_AMOUNT
 
     await update_service(
-        service_id=data["service_id"],
-        category_ua=data["category_ua"],
-        category_pt=data["category_pt"],
-        name_ua=data["name_ua"],
-        name_pt=data["name_pt"],
-        description_ua=data["description_ua"],
-        description_pt=data["description_pt"],
-        price=data["price"],
-        duration=duration,
-        deposit_amount=DEFAULT_DEPOSIT_AMOUNT,
+        service_id=service_id,
+        category_ua=category["ua"],
+        category_pt=category["pt"],
+        name_ua=service["name_ua"],
+        name_pt=service["name_pt"],
+        description_ua=service["description_ua"],
+        description_pt=service["description_pt"],
+        price=service["price"],
+        duration=service["duration"],
+        deposit_amount=deposit_amount,
     )
 
     await state.clear()
 
-    await message.answer(
-        "✅ Послугу успішно оновлено!",
-        reply_markup=admin_menu(),
+    await callback.message.answer("✅ Категорію змінено.")
+    await send_service_edit_menu(callback.message, service_id)
+    await callback.answer()
+
+
+@router.message(EditServiceState.name_ua)
+async def edit_service_name_ua(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await message.answer("Сесію редагування втрачено.")
+        await state.clear()
+        return
+
+    await update_one_service_field(
+        service_id,
+        "name_ua",
+        message.text,
     )
+
+    await state.clear()
+
+    await message.answer("✅ Назву українською змінено.")
+    await send_service_edit_menu(message, service_id)
+
+
+@router.message(EditServiceState.name_pt)
+async def edit_service_name_pt(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await message.answer("Сесію редагування втрачено.")
+        await state.clear()
+        return
+
+    await update_one_service_field(
+        service_id,
+        "name_pt",
+        message.text,
+    )
+
+    await state.clear()
+
+    await message.answer("✅ Назву португальською змінено.")
+    await send_service_edit_menu(message, service_id)
+
+
+@router.message(EditServiceState.description_ua)
+async def edit_service_description_ua(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await message.answer("Сесію редагування втрачено.")
+        await state.clear()
+        return
+
+    await update_one_service_field(
+        service_id,
+        "description_ua",
+        message.text,
+    )
+
+    await state.clear()
+
+    await message.answer("✅ Опис українською змінено.")
+    await send_service_edit_menu(message, service_id)
+
+
+@router.message(EditServiceState.description_pt)
+async def edit_service_description_pt(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await message.answer("Сесію редагування втрачено.")
+        await state.clear()
+        return
+
+    await update_one_service_field(
+        service_id,
+        "description_pt",
+        message.text,
+    )
+
+    await state.clear()
+
+    await message.answer("✅ Опис португальською змінено.")
+    await send_service_edit_menu(message, service_id)
+
+
+@router.message(EditServiceState.price)
+async def edit_service_price(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await message.answer("Сесію редагування втрачено.")
+        await state.clear()
+        return
+
+    try:
+        price = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Введіть ціну числом. Наприклад: 45")
+        return
+
+    await update_one_service_field(
+        service_id,
+        "price",
+        price,
+    )
+
+    await state.clear()
+
+    await message.answer("✅ Ціну змінено.")
+    await send_service_edit_menu(message, service_id)
+
+
+@router.message(EditServiceState.duration)
+async def edit_service_duration(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    service_id = data.get("service_id")
+
+    if not service_id:
+        await message.answer("Сесію редагування втрачено.")
+        await state.clear()
+        return
+
+    try:
+        duration = int(message.text)
+    except ValueError:
+        await message.answer("Введіть тривалість числом у хвилинах. Наприклад: 90")
+        return
+
+    await update_one_service_field(
+        service_id,
+        "duration",
+        duration,
+    )
+
+    await state.clear()
+
+    await message.answer("✅ Тривалість змінено.")
+    await send_service_edit_menu(message, service_id)
+
+
+# ===== ВИДАЛЕННЯ / ВИМКНЕННЯ ПОСЛУГ =====
 
 
 @router.callback_query(F.data == "admin_delete_service")
@@ -1104,8 +1469,14 @@ async def start_add_extra(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(AddExtraState.master, F.data.startswith("extra_master:"))
-async def choose_master_for_extra(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(
+    AddExtraState.master,
+    F.data.startswith("extra_master:"),
+)
+async def choose_master_for_extra(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
     master_id = int(callback.data.split(":")[1])
 
     await state.update_data(master_id=master_id)
@@ -1119,13 +1490,22 @@ async def choose_master_for_extra(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(AddExtraState.category, F.data.startswith("extra_sc:"))
-async def choose_extra_category(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(
+    AddExtraState.category,
+    F.data.startswith("extra_sc:"),
+)
+async def choose_extra_category(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
     category_key = callback.data.split(":")[1]
     category = SERVICE_CATEGORIES.get(category_key)
 
     if not category:
-        await callback.answer("Категорію не знайдено", show_alert=True)
+        await callback.answer(
+            "Категорію не знайдено",
+            show_alert=True,
+        )
         return
 
     await state.update_data(

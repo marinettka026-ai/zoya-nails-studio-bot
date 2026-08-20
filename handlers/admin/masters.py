@@ -677,3 +677,22 @@ async def admin_back(
     )
 
     await callback.answer()
+
+
+@router.message(F.text == "/masters_ids")
+async def show_master_ids(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    masters = await get_all_masters()
+
+    if not masters:
+        await message.answer("Майстрів не знайдено.")
+        return
+
+    text = "👩‍💼 Майстри:\n\n"
+
+    for master in masters:
+        text += f"ID: {master['id']} — " f"{master['name']}\n"
+
+    await message.answer(text)
