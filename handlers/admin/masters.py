@@ -26,6 +26,11 @@ from keyboards.menus import admin_menu
 from locales.ua import BUTTONS as UA_BUTTONS
 from states.admin_state import AddMasterState, EditMasterState
 
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
+
+from services.calendar import get_calendar_service
+
 router = Router()
 
 
@@ -1029,3 +1034,89 @@ async def update_nastya_price(message: Message):
         result_lines.extend(f"• {item}" for item in added_extras)
 
     await message.answer("\n".join(result_lines))
+
+
+@router.message(F.text == "/check_nastya_28")
+async def check_nastya_28(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    calendar_id = "nastyazaitseva73@gmail.com"
+    timezone = "Europe/Lisbon"
+
+    tz = ZoneInfo(timezone)
+    check_date = datetime.strptime(
+        "2026-08-28",
+        "%Y-%m-%d",
+    ).date()
+
+    range_start = datetime.combine(
+        check_date,
+        time.min,
+        tzinfo=tz,
+    )
+
+    range_end = datetime.combine(
+        check_date,
+        time.max,
+        tzinfo=tz,
+    )
+
+    try:
+        service = get_calendar_service()
+
+        result = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=range_start.isoformat(),
+                timeMax=range_end.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                showDeleted=False,
+                maxResults=250,
+            )
+            .execute()
+        )
+
+        events = result.get("items", [])
+
+    except Exception as error:
+        await message.answer(
+            "❌ Помилка Google Calendar:\n\n" f"{type(error).__name__}: {error}"
+        )
+        return
+
+    lines = [
+        "🔎 Перевірка календаря Nastya",
+        "",
+        f"📅 Calendar ID: {calendar_id}",
+        "📆 Дата: 28.08.2026",
+        f"📌 Знайдено подій: {len(events)}",
+        "",
+    ]
+
+    if not events:
+        lines.append("❌ Google API не бачить жодної події на цю дату.")
+
+    else:
+        for index, event in enumerate(events, start=1):
+            summary = event.get("summary") or "Без назви"
+
+            start = event.get("start", {})
+            end = event.get("end", {})
+
+            start_value = start.get("dateTime") or start.get("date") or "—"
+
+            end_value = end.get("dateTime") or end.get("date") or "—"
+
+            lines.extend(
+                [
+                    f"{index}. {summary}",
+                    f"START: {start_value}",
+                    f"END: {end_value}",
+                    "",
+                ]
+            )
+
+    await message.answer("\n".join(lines))
