@@ -127,6 +127,69 @@ async def get_master_extras(master_id: int):
     return extras
 
 
+def service_group(service) -> str:
+    category = (service["category_ua"] or "").lower()
+    name = (service["name_ua"] or "").lower()
+
+    if "чолов" in category or "чолов" in name:
+        return "male"
+
+    if "педик" in category or "педик" in name:
+        return "pedicure"
+
+    return "manicure"
+
+
+def compact_service_name(service, language: str = "ua") -> str:
+    name = (
+        service["name_pt"]
+        if language == "pt" and service["name_pt"]
+        else service["name_ua"]
+    )
+
+    group = service_group(service)
+    normalized = (name or "").strip().lower()
+
+    if group == "male":
+        if "педик" in normalized or "pedicure" in normalized:
+            return "Pedicure" if language == "pt" else "Педикюр"
+        if "манік" in normalized or "manicure" in normalized:
+            return "Manicure" if language == "pt" else "Манікюр"
+
+    return name
+
+
+def public_price_note(language: str = "ua") -> str:
+    if language == "pt":
+        return (
+            "<b>ℹ️ IMPORTANTE</b>\\n\\n"
+            "A remoção do revestimento e a reparação de algumas unhas "
+            "dentro do serviço completo não são cobradas à parte.\\n\\n"
+            "Na manicure com verniz gel, dependendo do comprimento das unhas, "
+            "pode ser acrescentado +5 €."
+        )
+
+    return (
+        "<b>ℹ️ ВАЖЛИВО</b>\\n\\n"
+        "Зняття покриття та ремонт декількох нігтів у комплексній послузі "
+        "додатково не оплачуються.\\n\\n"
+        "Для манікюру з гель-лаком залежно від довжини нігтів "
+        "може бути додано +5 €."
+    )
+
+
+def extra_display_duration(extra, language: str = "ua") -> str:
+    name_ua = (extra["name_ua"] or "").strip().lower()
+
+    if "дизайн на всі нігті" in name_ua:
+        return "15–30 min" if language == "pt" else "15–30 хв"
+
+    if "spa" in name_ua:
+        return "15–20 min" if language == "pt" else "15–20 хв"
+
+    return format_duration(extra["duration"], language)
+
+
 @router.message(CommandStart())
 async def start_handler(message: Message):
     user = await get_user_by_telegram_id(message.from_user.id)
@@ -286,40 +349,61 @@ async def public_services_master_handler(callback: CallbackQuery):
         await callback.answer()
         return
 
-    if language == "pt":
-        title = f"💅 Serviços — {master['name']}"
-    else:
-        title = f"💅 Послуги — {master['name']}"
+    master_name = html.escape(str(master["name"]))
 
-    lines = [title, ""]
+    if language == "pt":
+        lines = [f"<b>💅 SERVIÇOS — {master_name.upper()}</b>", ""]
+        group_titles = {
+            "manicure": "<b>🌸 MANICURE</b>",
+            "pedicure": "<b>🦶 PEDICURE</b>",
+            "male": "<b>👨 SERVIÇOS MASCULINOS</b>",
+        }
+    else:
+        lines = [f"<b>💅 ПОСЛУГИ — {master_name.upper()}</b>", ""]
+        group_titles = {
+            "manicure": "<b>🌸 МАНІКЮР</b>",
+            "pedicure": "<b>🦶 ПЕДИКЮР</b>",
+            "male": "<b>👨 ЧОЛОВІЧІ ПОСЛУГИ</b>",
+        }
+
+    grouped_services = {
+        "manicure": [],
+        "pedicure": [],
+        "male": [],
+    }
 
     for service in services:
-        name = (
-            service["name_pt"]
-            if language == "pt" and service["name_pt"]
-            else service["name_ua"]
-        )
+        grouped_services[service_group(service)].append(service)
 
-        description = (
-            service["description_pt"]
-            if language == "pt" and service["description_pt"]
-            else service["description_ua"]
-        )
+    for group_name in ("manicure", "pedicure", "male"):
+        group_services = grouped_services[group_name]
 
-        lines.append(f"✨ {name}")
+        if not group_services:
+            continue
 
-        if description:
-            lines.append(description)
-
-        lines.append(f"💶 {format_price(service['price'])} €")
-        lines.append(f"⏳ {format_duration(service['duration'], language)}")
+        lines.append(group_titles[group_name])
         lines.append("")
+
+        for service in group_services:
+            name = compact_service_name(service, language)
+            safe_name = html.escape(str(name))
+
+            lines.append(f"✨ <b>{safe_name}</b>")
+            lines.append(
+                f"{format_price(service['price'])} € • "
+                f"{format_duration(service['duration'], language)}"
+            )
+            lines.append("")
 
     if extras:
         lines.append(
-            "➕ Serviços adicionais" if language == "pt" else "➕ Додаткові послуги"
+            "<b>➕ SERVIÇOS ADICIONAIS</b>"
+            if language == "pt"
+            else "<b>➕ ДОДАТКОВІ ПОСЛУГИ</b>"
         )
         lines.append("")
+
+        seen_extra_names = set()
 
         for extra in extras:
             name = (
@@ -328,25 +412,36 @@ async def public_services_master_handler(callback: CallbackQuery):
                 else extra["name_ua"]
             )
 
-            lines.append(f"✨ {name}")
-            lines.append(f"💶 {format_extra_price(extra['price'], language)}")
+            # In the public price list, show Baehr SPA only once.
+            normalized_name = (extra["name_ua"] or "").strip().lower()
+            dedupe_key = (
+                "baehr_spa"
+                if "spa" in normalized_name and "baehr" in normalized_name
+                else normalized_name
+            )
+
+            if dedupe_key in seen_extra_names:
+                continue
+
+            seen_extra_names.add(dedupe_key)
+
+            safe_name = html.escape(str(name))
+            price_text = format_extra_price(extra["price"], language)
 
             if int(extra["duration"] or 0) > 0:
-                duration_text = format_duration(
-                    extra["duration"],
-                    language,
-                )
+                duration_text = extra_display_duration(extra, language)
+                lines.append(f"✨ {safe_name} — {price_text} • +{duration_text}")
+            else:
+                lines.append(f"✨ {safe_name} — {price_text}")
 
-                if language == "pt":
-                    lines.append(f"⏳ +{duration_text}")
-                else:
-                    lines.append(f"⏳ +{duration_text}")
-
-            lines.append("")
+        lines.append("")
+        lines.append("")
+        lines.append(public_price_note(language))
 
     await callback.message.answer(
-        "\n".join(lines),
+        "\\n".join(lines),
         reply_markup=public_service_back_to_masters_keyboard(language),
+        parse_mode="HTML",
     )
 
     await callback.answer()
