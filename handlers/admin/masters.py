@@ -15,6 +15,8 @@ from database.queries import (
     get_master_by_id,
     update_master,
     delete_master,
+    get_services_by_master,
+    add_service,
 )
 from keyboards.menus import admin_menu
 from locales.ua import BUTTONS as UA_BUTTONS
@@ -696,3 +698,78 @@ async def show_master_ids(message: Message):
         text += f"ID: {master['id']} — " f"{master['name']}\n"
 
     await message.answer(text)
+
+
+@router.message(F.text == "/copy_services")
+async def copy_zoya_services_to_nastya(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    SOURCE_MASTER_ID = 2  # Zoya
+    TARGET_MASTER_ID = 7  # Nastya
+    PRICE_DISCOUNT = 10
+
+    source_master = await get_master_by_id(SOURCE_MASTER_ID)
+    target_master = await get_master_by_id(TARGET_MASTER_ID)
+
+    if not source_master or not target_master:
+        await message.answer("❌ Не вдалося знайти Zoya або Nastya в базі.")
+        return
+
+    source_services = await get_services_by_master(SOURCE_MASTER_ID)
+
+    if not source_services:
+        await message.answer("❌ У Zoya немає активних послуг для копіювання.")
+        return
+
+    target_services = await get_services_by_master(TARGET_MASTER_ID)
+
+    existing_keys = {
+        (
+            (service["name_ua"] or "").strip().lower(),
+            (service["category_ua"] or "").strip().lower(),
+        )
+        for service in target_services
+    }
+
+    copied = 0
+    skipped = 0
+
+    for service in source_services:
+        service_key = (
+            (service["name_ua"] or "").strip().lower(),
+            (service["category_ua"] or "").strip().lower(),
+        )
+
+        if service_key in existing_keys:
+            skipped += 1
+            continue
+
+        old_price = float(service["price"] or 0)
+        new_price = max(0, old_price - PRICE_DISCOUNT)
+
+        await add_service(
+            master_id=TARGET_MASTER_ID,
+            name_ua=service["name_ua"],
+            name_pt=service["name_pt"],
+            description_ua=service["description_ua"],
+            description_pt=service["description_pt"],
+            category_ua=service["category_ua"],
+            category_pt=service["category_pt"],
+            price=new_price,
+            duration=int(service["duration"] or 0),
+            deposit_amount=float(service["deposit_amount"] or 0),
+            resource_type=service["resource_type"] or "manicure",
+        )
+
+        existing_keys.add(service_key)
+        copied += 1
+
+    await message.answer(
+        "✅ Копіювання завершено.\n\n"
+        f"Звідки: {source_master['name']} (ID {SOURCE_MASTER_ID})\n"
+        f"Куди: {target_master['name']} (ID {TARGET_MASTER_ID})\n"
+        f"Знижка для Nastya: -{PRICE_DISCOUNT} €\n\n"
+        f"Скопійовано: {copied}\n"
+        f"Пропущено як дублікати: {skipped}"
+    )
