@@ -11,6 +11,7 @@ from database.queries import (
     add_user,
     get_active_masters,
     get_master_by_id,
+    get_service_extras_by_category,
     get_services_by_master,
     get_user_by_telegram_id,
     update_user_language,
@@ -22,6 +23,13 @@ from locales.ua import BUTTONS as UA_BUTTONS
 from locales.ua import TEXTS as UA_TEXTS
 
 router = Router()
+
+
+EXTRA_CATEGORIES = [
+    "Манікюр жіночий",
+    "Педикюр жіночий",
+    "Чоловічий манікюр та педикюр",
+]
 
 
 def public_service_masters_keyboard(masters, language: str = "ua"):
@@ -86,6 +94,37 @@ def format_duration(duration: int, language: str = "ua"):
     if hours:
         return f"{hours} год"
     return f"{minutes} хв"
+
+
+def format_price(price) -> str:
+    value = float(price or 0)
+
+    if value.is_integer():
+        return str(int(value))
+
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def format_extra_price(price, language: str = "ua") -> str:
+    value = float(price or 0)
+
+    if value == 0:
+        return "Grátis" if language == "pt" else "Безкоштовно"
+
+    return f"+{format_price(value)} €"
+
+
+async def get_master_extras(master_id: int):
+    extras = []
+
+    for category_ua in EXTRA_CATEGORIES:
+        category_extras = await get_service_extras_by_category(
+            master_id,
+            category_ua,
+        )
+        extras.extend(category_extras)
+
+    return extras
 
 
 @router.message(CommandStart())
@@ -231,6 +270,7 @@ async def public_services_master_handler(callback: CallbackQuery):
         return
 
     services = await get_services_by_master(master_id)
+    extras = await get_master_extras(master_id)
 
     if not services:
         text = (
@@ -271,9 +311,38 @@ async def public_services_master_handler(callback: CallbackQuery):
         if description:
             lines.append(description)
 
-        lines.append(f"💶 {service['price']}€")
+        lines.append(f"💶 {format_price(service['price'])} €")
         lines.append(f"⏳ {format_duration(service['duration'], language)}")
         lines.append("")
+
+    if extras:
+        lines.append(
+            "➕ Serviços adicionais" if language == "pt" else "➕ Додаткові послуги"
+        )
+        lines.append("")
+
+        for extra in extras:
+            name = (
+                extra["name_pt"]
+                if language == "pt" and extra["name_pt"]
+                else extra["name_ua"]
+            )
+
+            lines.append(f"✨ {name}")
+            lines.append(f"💶 {format_extra_price(extra['price'], language)}")
+
+            if int(extra["duration"] or 0) > 0:
+                duration_text = format_duration(
+                    extra["duration"],
+                    language,
+                )
+
+                if language == "pt":
+                    lines.append(f"⏳ +{duration_text}")
+                else:
+                    lines.append(f"⏳ +{duration_text}")
+
+            lines.append("")
 
     await callback.message.answer(
         "\n".join(lines),
