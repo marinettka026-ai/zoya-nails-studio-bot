@@ -1353,7 +1353,7 @@ async def master_exception_date_handler(callback: CallbackQuery, state: FSMConte
     await state.clear()
     await state.update_data(exception_master_id=master_id)
     await state.set_state(MasterScheduleExceptionState.choosing_date)
-    await callback.message.answer("📅 Введіть дату.\\n\\nНаприклад: 28.09.2026")
+    await callback.message.answer("📅 Введіть дату.\n\nНаприклад: 28.09.2026")
     await callback.answer()
 
 
@@ -1380,7 +1380,7 @@ async def master_exception_date_received(message: Message, state: FSMContext):
         current = "Винятку немає — діє звичайний тижневий графік."
 
     await message.answer(
-        f"📅 {selected.strftime('%d.%m.%Y')}\\n\\n{current}\\n\\nЩо зробити?",
+        f"📅 {selected.strftime('%d.%m.%Y')}\n\n{current}\n\nЩо зробити?",
         reply_markup=schedule_exception_action_keyboard(master_id, selected_date),
     )
 
@@ -1412,8 +1412,8 @@ async def master_exception_hours_handler(callback: CallbackQuery, state: FSMCont
     )
     await state.set_state(MasterScheduleExceptionState.entering_hours)
     await callback.message.answer(
-        "🕒 Введіть години для цієї дати.\\n\\n"
-        "Наприклад: 14:00-18:30\\n\\n"
+        "🕒 Введіть години для цієї дати.\n\n"
+        "Наприклад: 14:00-18:30\n\n"
         "Так можна відкрити навіть звичайний вихідний."
     )
     await callback.answer()
@@ -1474,8 +1474,8 @@ async def master_exception_period_handler(callback: CallbackQuery, state: FSMCon
     await state.update_data(exception_master_id=master_id)
     await state.set_state(MasterScheduleExceptionState.entering_period)
     await callback.message.answer(
-        "🏖 Введіть період, який потрібно повністю закрити.\\n\\n"
-        "Формат: 29.09.2026-05.10.2026\\n"
+        "🏖 Введіть період, який потрібно повністю закрити.\n\n"
+        "Формат: 29.09.2026-05.10.2026\n"
         "Обидві дати входять у період."
     )
     await callback.answer()
@@ -1534,9 +1534,9 @@ async def master_exception_list_handler(callback: CallbackQuery):
         else:
             lines.append(f"🚫 {shown}: закрито")
 
-    result = "\\n".join(lines)
+    result = "\n".join(lines)
     if len(result) > 3900:
-        result = result[:3900] + "\\n…"
+        result = result[:3900] + "\n…"
     await callback.message.answer(result)
     await callback.answer()
 
@@ -1551,7 +1551,7 @@ async def master_exception_delete_handler(callback: CallbackQuery, state: FSMCon
     await state.update_data(exception_master_id=master_id)
     await state.set_state(MasterScheduleExceptionState.deleting_date)
     await callback.message.answer(
-        "🗑 Введіть дату, для якої потрібно прибрати виняток.\\n\\n"
+        "🗑 Введіть дату, для якої потрібно прибрати виняток.\n\n"
         "Наприклад: 28.09.2026"
     )
     await callback.answer()
