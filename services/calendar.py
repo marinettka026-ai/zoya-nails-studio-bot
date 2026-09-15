@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+import re
 from zoneinfo import ZoneInfo
 
 from google.oauth2 import service_account
@@ -9,6 +10,21 @@ from config import GOOGLE_SERVICE_ACCOUNT_FILE
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 DEFAULT_TIMEZONE = "Europe/Lisbon"
 _CALENDARS_PRINTED = False
+
+# Маркери ручного запису на педикюр.
+# Короткі форми перевіряються як окремі слова, щоб випадкове "ped"
+# всередині іншого слова не блокувало педикюрне крісло.
+PEDICURE_EVENT_WORDS = {
+    "пед",
+    "педі",
+    "педи",
+    "педикюр",
+    "педикюру",
+    "педикюром",
+    "ped",
+    "pedi",
+    "pedicure",
+}
 
 
 def get_calendar_service():
@@ -117,7 +133,7 @@ def _parse_google_event_datetime(
     return None
 
 
-def get_busy_intervals(
+def _get_calendar_events(
     calendar_id: str,
     date: str,
     start_time: str,
@@ -125,19 +141,11 @@ def get_busy_intervals(
     timezone: str = DEFAULT_TIMEZONE,
 ):
     """
-    Отримує реальні події Google Calendar за потрібний проміжок.
-
-    Будь-яка подія в календарі вважається зайнятим часом,
-    навіть якщо в Google Calendar вона позначена як Free.
+    Повертає події Google Calendar, які перетинаються із заданим проміжком.
+    Скасовані події ігноруються.
     """
-    global _CALENDARS_PRINTED
-
     if not calendar_id:
         return []
-
-    if not _CALENDARS_PRINTED:
-        print_available_calendars()
-        _CALENDARS_PRINTED = True
 
     service = get_calendar_service()
 
@@ -166,23 +174,10 @@ def get_busy_intervals(
         .execute()
     )
 
-    items = result.get("items", [])
+    events = []
 
-    print("========== GOOGLE CALENDAR DEBUG ==========")
-    print("CALENDAR ID:", calendar_id)
-    print("DATE:", date)
-    print("REQUEST RANGE:", range_start.isoformat(), "->", range_end.isoformat())
-    print("GOOGLE EVENTS FOUND:", len(items))
-
-    intervals = []
-
-    for event in items:
+    for event in result.get("items", []):
         if event.get("status") == "cancelled":
-            print(
-                "SKIP CANCELLED EVENT:",
-                event.get("id"),
-                event.get("summary"),
-            )
             continue
 
         event_start = _parse_google_event_datetime(
@@ -194,6 +189,144 @@ def get_busy_intervals(
             timezone,
         )
 
+        if not event_start or not event_end:
+            continue
+
+        if event_start < range_end and event_end > range_start:
+            events.append(
+                {
+                    "id": event.get("id"),
+                    "summary": event.get("summary") or "",
+                    "description": event.get("description") or "",
+                    "status": event.get("status"),
+                    "transparency": event.get("transparency"),
+                    "start": event_start,
+                    "end": event_end,
+                }
+            )
+
+    return events
+
+
+def _normalize_event_words(value: str) -> set[str]:
+    """
+    Розбиває назву/опис події на окремі слова.
+    Працює з українською, російською, португальською та латиницею.
+    """
+    normalized = (value or "").casefold().replace("ё", "е")
+    return set(re.findall(r"[0-9a-zа-яіїєґ]+", normalized, flags=re.IGNORECASE))
+
+
+def is_pedicure_event(event: dict) -> bool:
+    """
+    Визначає, чи означає ручна Google Calendar подія педикюр.
+
+    Основне джерело — summary. Description також враховується, тому
+    події, створені ботом із назвою послуги в описі, теж розпізнаються.
+    """
+    words = _normalize_event_words(
+        f"{event.get('summary', '')} {event.get('description', '')}"
+    )
+    return bool(words & PEDICURE_EVENT_WORDS)
+
+
+def get_pedicure_busy_intervals(
+    calendar_ids,
+    date: str,
+    start_time: str,
+    end_time: str,
+    timezone: str = DEFAULT_TIMEZONE,
+):
+    """
+    Перевіряє календарі всіх переданих майстрів і повертає тільки ті
+    інтервали, де подія схожа на ручний/ботовий запис на педикюр.
+
+    Одна й та сама calendar_id перевіряється лише один раз.
+    """
+    unique_calendar_ids = []
+    seen = set()
+
+    for calendar_id in calendar_ids or []:
+        if not calendar_id or calendar_id in seen:
+            continue
+        seen.add(calendar_id)
+        unique_calendar_ids.append(calendar_id)
+
+    intervals = []
+
+    for calendar_id in unique_calendar_ids:
+        events = _get_calendar_events(
+            calendar_id=calendar_id,
+            date=date,
+            start_time=start_time,
+            end_time=end_time,
+            timezone=timezone,
+        )
+
+        for event in events:
+            if not is_pedicure_event(event):
+                continue
+
+            intervals.append(
+                (
+                    event["start"],
+                    event["end"],
+                )
+            )
+
+            print(
+                "PEDICURE RESOURCE BUSY:",
+                calendar_id,
+                "|",
+                event.get("summary"),
+                "|",
+                event["start"],
+                "->",
+                event["end"],
+            )
+
+    return intervals
+
+
+def get_busy_intervals(
+    calendar_id: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+    timezone: str = DEFAULT_TIMEZONE,
+):
+    """
+    Отримує реальні події Google Calendar за потрібний проміжок.
+
+    Будь-яка подія в календарі вважається зайнятим часом,
+    навіть якщо в Google Calendar вона позначена як Free.
+    """
+    global _CALENDARS_PRINTED
+
+    if not calendar_id:
+        return []
+
+    if not _CALENDARS_PRINTED:
+        print_available_calendars()
+        _CALENDARS_PRINTED = True
+
+    events = _get_calendar_events(
+        calendar_id=calendar_id,
+        date=date,
+        start_time=start_time,
+        end_time=end_time,
+        timezone=timezone,
+    )
+
+    print("========== GOOGLE CALENDAR DEBUG ==========")
+    print("CALENDAR ID:", calendar_id)
+    print("DATE:", date)
+    print("REQUEST RANGE:", start_time, "->", end_time)
+    print("GOOGLE EVENTS FOUND:", len(events))
+
+    intervals = []
+
+    for event in events:
         print(
             "EVENT:",
             event.get("summary"),
@@ -204,21 +337,17 @@ def get_busy_intervals(
             "| TRANSPARENCY:",
             event.get("transparency"),
             "| START:",
-            event_start,
+            event.get("start"),
             "| END:",
-            event_end,
+            event.get("end"),
         )
 
-        if not event_start or not event_end:
-            continue
-
-        if event_start < range_end and event_end > range_start:
-            intervals.append(
-                (
-                    event_start,
-                    event_end,
-                )
+        intervals.append(
+            (
+                event["start"],
+                event["end"],
             )
+        )
 
     print("BUSY INTERVALS USED:", len(intervals))
     for busy_start, busy_end in intervals:

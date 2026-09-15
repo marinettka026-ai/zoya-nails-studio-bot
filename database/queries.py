@@ -91,6 +91,182 @@ async def accept_rules(telegram_id: int):
         await db.commit()
 
 
+async def get_master_schedule_exception(master_id: int, selected_date: str):
+    """Повертає разовий виняток графіка майстра на конкретну дату."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT
+                id,
+                master_id,
+                date,
+                is_working,
+                start_time,
+                end_time,
+                created_at,
+                updated_at
+            FROM master_schedule_exceptions
+            WHERE master_id = ? AND date = ?
+            LIMIT 1
+            """,
+            (master_id, selected_date),
+        )
+
+        return await cursor.fetchone()
+
+
+async def get_master_schedule_exceptions(
+    master_id: int,
+    start_date: str | None = None,
+    end_date: str | None = None,
+):
+    """Повертає винятки графіка майстра, за потреби — у межах періоду."""
+    query = """
+        SELECT
+            id,
+            master_id,
+            date,
+            is_working,
+            start_time,
+            end_time,
+            created_at,
+            updated_at
+        FROM master_schedule_exceptions
+        WHERE master_id = ?
+    """
+    params = [master_id]
+
+    if start_date:
+        query += " AND date >= ?"
+        params.append(start_date)
+
+    if end_date:
+        query += " AND date <= ?"
+        params.append(end_date)
+
+    query += " ORDER BY date"
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(query, params)
+        return await cursor.fetchall()
+
+
+async def set_master_schedule_exception(
+    master_id: int,
+    selected_date: str,
+    is_working: bool,
+    start_time: str | None = None,
+    end_time: str | None = None,
+):
+    """
+    Створює або оновлює виняток графіка.
+
+    is_working=False:
+        день повністю закритий, години зберігаються як NULL.
+
+    is_working=True:
+        дата відкрита на конкретний проміжок start_time-end_time.
+    """
+    if is_working:
+        if not start_time or not end_time:
+            raise ValueError(
+                "Для робочого винятку потрібно вказати start_time та end_time."
+            )
+        if start_time >= end_time:
+            raise ValueError("start_time має бути раніше за end_time.")
+    else:
+        start_time = None
+        end_time = None
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO master_schedule_exceptions (
+                master_id,
+                date,
+                is_working,
+                start_time,
+                end_time,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(master_id, date) DO UPDATE SET
+                is_working = excluded.is_working,
+                start_time = excluded.start_time,
+                end_time = excluded.end_time,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                master_id,
+                selected_date,
+                1 if is_working else 0,
+                start_time,
+                end_time,
+            ),
+        )
+        await db.commit()
+
+
+async def close_master_schedule_period(
+    master_id: int,
+    start_date: str,
+    end_date: str,
+):
+    """Закриває для запису всі календарні дні у вказаному періоді включно."""
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    if start > end:
+        raise ValueError("Дата початку періоду не може бути пізніше дати завершення.")
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        current = start
+
+        while current <= end:
+            selected_date = current.strftime("%Y-%m-%d")
+
+            await db.execute(
+                """
+                INSERT INTO master_schedule_exceptions (
+                    master_id,
+                    date,
+                    is_working,
+                    start_time,
+                    end_time,
+                    updated_at
+                )
+                VALUES (?, ?, 0, NULL, NULL, CURRENT_TIMESTAMP)
+                ON CONFLICT(master_id, date) DO UPDATE SET
+                    is_working = 0,
+                    start_time = NULL,
+                    end_time = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (master_id, selected_date),
+            )
+
+            current += timedelta(days=1)
+
+        await db.commit()
+
+
+async def delete_master_schedule_exception(master_id: int, selected_date: str):
+    """Видаляє виняток і повертає дату до звичайного тижневого графіка."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            DELETE FROM master_schedule_exceptions
+            WHERE master_id = ? AND date = ?
+            """,
+            (master_id, selected_date),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
 async def add_master(
     name: str,
     telegram_id: int = None,
@@ -1197,6 +1373,95 @@ async def is_resource_available(
         return available
 
 
+async def _is_master_available_in_db(
+    db,
+    master_id: int,
+    date: str,
+    start_time: str,
+    end_time: str,
+) -> bool:
+    cursor = await db.execute(
+        """
+        SELECT COUNT(*)
+        FROM booking_services bs
+        JOIN bookings b ON b.id = bs.booking_id
+        WHERE bs.master_id = ?
+          AND bs.date = ?
+          AND b.status NOT IN ('cancelled', 'rejected')
+          AND bs.start_time < ?
+          AND bs.end_time > ?
+        """,
+        (master_id, date, end_time, start_time),
+    )
+    count = (await cursor.fetchone())[0]
+    return count == 0
+
+
+async def _get_resource_capacity_in_db(db, resource_type: str) -> int:
+    cursor = await db.execute(
+        """
+        SELECT capacity
+        FROM salon_resources
+        WHERE resource_type = ?
+          AND is_active = 1
+        """,
+        (resource_type,),
+    )
+    row = await cursor.fetchone()
+    return row[0] if row else 1
+
+
+async def _is_resource_available_in_db(
+    db,
+    resource_type: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+) -> bool:
+    capacity = await _get_resource_capacity_in_db(db, resource_type)
+
+    cursor = await db.execute(
+        """
+        SELECT COUNT(*)
+        FROM booking_services bs
+        JOIN bookings b ON b.id = bs.booking_id
+        WHERE bs.resource_type = ?
+          AND bs.date = ?
+          AND b.status NOT IN ('cancelled', 'rejected')
+          AND bs.start_time < ?
+          AND bs.end_time > ?
+        """,
+        (resource_type, date, end_time, start_time),
+    )
+    busy_count = (await cursor.fetchone())[0]
+    return busy_count < capacity
+
+
+async def _segments_available_in_db(db, segments: list[dict]) -> bool:
+    for segment in segments:
+        master_free = await _is_master_available_in_db(
+            db=db,
+            master_id=segment["master_id"],
+            date=segment["date"],
+            start_time=segment["start_time"],
+            end_time=segment["end_time"],
+        )
+        if not master_free:
+            return False
+
+        resource_free = await _is_resource_available_in_db(
+            db=db,
+            resource_type=segment["resource_type"],
+            date=segment["date"],
+            start_time=segment["start_time"],
+            end_time=segment["end_time"],
+        )
+        if not resource_free:
+            return False
+
+    return True
+
+
 async def build_booking_segments(
     master_id: int,
     service_ids: list[int],
@@ -1294,154 +1559,96 @@ async def create_combined_booking(
     if not segments:
         return None
 
-    available = await is_combined_booking_available(
-        master_id=master_id,
-        service_ids=service_ids,
-        date=date,
-        start_time=start_time,
-    )
-
-    if not available:
-        return None
-
     total_price = sum(segment["price"] for segment in segments)
     total_duration = sum(segment["duration"] for segment in segments)
     end_time = segments[-1]["end_time"]
     first_service_id = service_ids[0]
 
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            """
-            INSERT INTO bookings (
-                client_id,
-                master_id,
-                service_id,
-                client_name,
-                client_phone,
-                date,
-                time,
-                end_time,
-                total_price,
-                total_duration,
-                comment,
-                status,
-                payment_status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                client_id,
-                master_id,
-                first_service_id,
-                client_name,
-                client_phone,
-                date,
-                start_time,
-                end_time,
-                total_price,
-                total_duration,
-                comment,
-                "waiting_confirmation",
-                "not_required",
-            ),
-        )
+        await db.execute("PRAGMA busy_timeout = 5000")
 
-        booking_id = cursor.lastrowid
+        try:
+            await db.execute("BEGIN IMMEDIATE")
 
-        for segment in segments:
-            await db.execute(
+            if not await _segments_available_in_db(db, segments):
+                await db.rollback()
+                return None
+
+            cursor = await db.execute(
                 """
-                INSERT INTO booking_services (
-                    booking_id,
+                INSERT INTO bookings (
+                    client_id,
                     master_id,
                     service_id,
+                    client_name,
+                    client_phone,
+                    date,
+                    time,
+                    end_time,
+                    total_price,
+                    total_duration,
+                    comment,
+                    status,
+                    payment_status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    client_id,
+                    master_id,
+                    first_service_id,
+                    client_name,
+                    client_phone,
                     date,
                     start_time,
                     end_time,
-                    resource_type,
-                    position,
-                    price,
-                    duration
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    booking_id,
-                    segment["master_id"],
-                    segment["service_id"],
-                    segment["date"],
-                    segment["start_time"],
-                    segment["end_time"],
-                    segment["resource_type"],
-                    segment["position"],
-                    segment["price"],
-                    segment["duration"],
+                    total_price,
+                    total_duration,
+                    comment,
+                    "waiting_confirmation",
+                    "not_required",
                 ),
             )
 
-        await db.commit()
-        return booking_id
+            booking_id = cursor.lastrowid
 
+            for segment in segments:
+                await db.execute(
+                    """
+                    INSERT INTO booking_services (
+                        booking_id,
+                        master_id,
+                        service_id,
+                        date,
+                        start_time,
+                        end_time,
+                        resource_type,
+                        position,
+                        price,
+                        duration
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        booking_id,
+                        segment["master_id"],
+                        segment["service_id"],
+                        segment["date"],
+                        segment["start_time"],
+                        segment["end_time"],
+                        segment["resource_type"],
+                        segment["position"],
+                        segment["price"],
+                        segment["duration"],
+                    ),
+                )
 
-async def is_resource_available(
-    resource_type: str,
-    date: str,
-    start_time: str,
-    end_time: str,
-) -> bool:
-    capacity = await get_resource_capacity(resource_type)
+            await db.commit()
+            return booking_id
 
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-
-        cursor = await db.execute(
-            """
-            SELECT
-                bs.id,
-                bs.booking_id,
-                bs.master_id,
-                bs.service_id,
-                bs.date,
-                bs.start_time,
-                bs.end_time,
-                bs.resource_type,
-                b.status
-            FROM booking_services bs
-            JOIN bookings b ON b.id = bs.booking_id
-            WHERE bs.resource_type = ?
-              AND bs.date = ?
-              AND b.status NOT IN ('cancelled', 'rejected')
-              AND bs.start_time < ?
-              AND bs.end_time > ?
-            """,
-            (
-                resource_type,
-                date,
-                end_time,
-                start_time,
-            ),
-        )
-
-        busy_rows = await cursor.fetchall()
-        busy_count = len(busy_rows)
-
-        print("========== RESOURCE CHECK ==========")
-        print("RESOURCE:", resource_type)
-        print("DATE:", date)
-        print("REQUESTED:", start_time, "-", end_time)
-        print("CAPACITY:", capacity)
-        print("BUSY COUNT:", busy_count)
-
-        for row in busy_rows:
-            print(
-                "FOUND:",
-                dict(row),
-            )
-
-        print("AVAILABLE:", busy_count < capacity)
-        print("====================================")
-
-        return busy_count < capacity
+        except Exception:
+            await db.rollback()
+            raise
 
 
 async def build_booking_segments_from_items(
@@ -1544,9 +1751,6 @@ async def create_booking_from_selected_services(
     if not segments:
         return None
 
-    if not await is_selected_services_available(selected_services, date, start_time):
-        return None
-
     total_price = sum(segment["price"] for segment in segments)
     total_duration = sum(segment["duration"] for segment in segments)
     end_time = segments[-1]["end_time"]
@@ -1554,79 +1758,92 @@ async def create_booking_from_selected_services(
     first_segment = segments[0]
 
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            """
-            INSERT INTO bookings (
-                client_id,
-                master_id,
-                service_id,
-                client_name,
-                client_phone,
-                date,
-                time,
-                end_time,
-                total_price,
-                total_duration,
-                comment,
-                status,
-                payment_status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                client_id,
-                first_segment["master_id"],
-                first_segment["service_id"],
-                client_name,
-                client_phone,
-                date,
-                start_time,
-                end_time,
-                total_price,
-                total_duration,
-                comment,
-                "waiting_confirmation",
-                "not_required",
-            ),
-        )
+        await db.execute("PRAGMA busy_timeout = 5000")
 
-        booking_id = cursor.lastrowid
+        try:
+            await db.execute("BEGIN IMMEDIATE")
 
-        for segment in segments:
-            await db.execute(
+            if not await _segments_available_in_db(db, segments):
+                await db.rollback()
+                return None
+
+            cursor = await db.execute(
                 """
-                INSERT INTO booking_services (
-                    booking_id,
+                INSERT INTO bookings (
+                    client_id,
                     master_id,
                     service_id,
+                    client_name,
+                    client_phone,
+                    date,
+                    time,
+                    end_time,
+                    total_price,
+                    total_duration,
+                    comment,
+                    status,
+                    payment_status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    client_id,
+                    first_segment["master_id"],
+                    first_segment["service_id"],
+                    client_name,
+                    client_phone,
                     date,
                     start_time,
                     end_time,
-                    resource_type,
-                    extras,
-                    position,
-                    price,
-                    duration
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    booking_id,
-                    segment["master_id"],
-                    segment["service_id"],
-                    segment["date"],
-                    segment["start_time"],
-                    segment["end_time"],
-                    segment["resource_type"],
-                    json.dumps(segment["extras"], ensure_ascii=False),
-                    segment["position"],
-                    segment["price"],
-                    segment["duration"],
+                    total_price,
+                    total_duration,
+                    comment,
+                    "waiting_confirmation",
+                    "not_required",
                 ),
             )
 
-        await db.commit()
-        return booking_id
+            booking_id = cursor.lastrowid
+
+            for segment in segments:
+                await db.execute(
+                    """
+                    INSERT INTO booking_services (
+                        booking_id,
+                        master_id,
+                        service_id,
+                        date,
+                        start_time,
+                        end_time,
+                        resource_type,
+                        extras,
+                        position,
+                        price,
+                        duration
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        booking_id,
+                        segment["master_id"],
+                        segment["service_id"],
+                        segment["date"],
+                        segment["start_time"],
+                        segment["end_time"],
+                        segment["resource_type"],
+                        json.dumps(segment["extras"], ensure_ascii=False),
+                        segment["position"],
+                        segment["price"],
+                        segment["duration"],
+                    ),
+                )
+
+            await db.commit()
+            return booking_id
+
+        except Exception:
+            await db.rollback()
+            raise
 
 
 async def get_active_bookings_by_telegram_id(telegram_id: int):

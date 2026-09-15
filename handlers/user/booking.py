@@ -14,9 +14,11 @@ from aiogram.types import (
 from database.queries import (
     accept_rules,
     create_booking_from_selected_services,
+    build_booking_segments_from_items,
     get_active_masters,
     get_extra_by_id,
     get_master_by_id,
+    get_master_schedule_exception,
     get_service_by_id,
     get_service_categories_by_master,
     get_service_extras_by_category,
@@ -32,7 +34,11 @@ from locales.pt import BUTTONS as PT_BUTTONS
 from locales.pt import TEXTS as PT_TEXTS
 from locales.ua import BUTTONS as UA_BUTTONS
 from locales.ua import TEXTS as UA_TEXTS
-from services.calendar import get_busy_intervals, slot_overlaps_busy
+from services.calendar import (
+    get_busy_intervals,
+    get_pedicure_busy_intervals,
+    slot_overlaps_busy,
+)
 from services.notifications import notify_master_about_booking
 from states.booking_state import BookingState
 
@@ -403,9 +409,56 @@ async def get_total_duration(selected_services: list[dict]) -> int:
     return total
 
 
-async def get_available_times(master, selected_services, selected_date: str):
-    work_start, work_end = get_work_hours_for_date(
+async def selected_services_use_pedicure(selected_services: list[dict]) -> bool:
+    """Чи використовує хоча б одна вибрана основна послуга педикюрне крісло."""
+    for item in selected_services:
+        service = await get_service_by_id(item["service_id"])
+        if service and service["resource_type"] == "pedicure":
+            return True
+    return False
+
+
+async def get_all_active_master_calendar_ids() -> list[str]:
+    """Повертає унікальні Google Calendar ID усіх активних майстрів."""
+    masters = await get_active_masters()
+    calendar_ids = []
+    seen = set()
+
+    for master in masters:
+        calendar_id = master["calendar_id"]
+        if not calendar_id or calendar_id in seen:
+            continue
+        seen.add(calendar_id)
+        calendar_ids.append(calendar_id)
+
+    return calendar_ids
+
+
+async def get_effective_work_hours(master, selected_date: str):
+    """
+    Виняток на конкретну дату має пріоритет над постійним тижневим графіком.
+    Закритий виняток повертає неробочий день.
+    Робочий виняток може відкрити навіть звичайний вихідний.
+    """
+    exception = await get_master_schedule_exception(
+        master_id=master["id"],
+        selected_date=selected_date,
+    )
+
+    if exception:
+        if not exception["is_working"]:
+            return None, None
+        return exception["start_time"], exception["end_time"]
+
+    return get_work_hours_for_date(
         master["schedule"],
+        selected_date,
+    )
+
+
+async def get_available_times(master, selected_services, selected_date: str):
+    work_start, work_end = await get_effective_work_hours(
+        master,
         selected_date,
     )
     if not work_start or not work_end:
@@ -436,6 +489,25 @@ async def get_available_times(master, selected_services, selected_date: str):
             )
         except Exception as error:
             print("GOOGLE CALENDAR CHECK ERROR:", repr(error))
+            return []
+
+    pedicure_busy_intervals = []
+    uses_pedicure = await selected_services_use_pedicure(selected_services)
+
+    if uses_pedicure:
+        try:
+            calendar_ids = await get_all_active_master_calendar_ids()
+            pedicure_busy_intervals = await asyncio.to_thread(
+                get_pedicure_busy_intervals,
+                calendar_ids=calendar_ids,
+                date=selected_date,
+                start_time=work_start,
+                end_time=work_end,
+            )
+        except Exception as error:
+            # Для спільного педикюрного ресурсу краще не показувати
+            # потенційно небезпечний слот, якщо Google Calendar недоступний.
+            print("PEDICURE GOOGLE RESOURCE CHECK ERROR:", repr(error))
             return []
 
     for time_str in generate_time_slots(work_start, work_end):
@@ -473,37 +545,60 @@ async def get_available_times(master, selected_services, selected_date: str):
             )
 
             print("========== SLOT CHECK ==========")
-            print(
-                "DATE:",
-                selected_date,
-            )
-            print(
-                "SLOT:",
-                time_str,
-                "-",
-                slot_end.strftime("%H:%M"),
-            )
-            print(
-                "GOOGLE BUSY:",
-                google_busy,
-            )
-            print(
-                "GOOGLE INTERVALS:",
-                len(busy_intervals),
-            )
+            print("DATE:", selected_date)
+            print("SLOT:", time_str, "-", slot_end.strftime("%H:%M"))
+            print("GOOGLE BUSY:", google_busy)
+            print("GOOGLE INTERVALS:", len(busy_intervals))
             print("================================")
 
         if google_busy:
             continue
+
+        if uses_pedicure:
+            segments = await build_booking_segments_from_items(
+                selected_services=selected_services,
+                date=selected_date,
+                start_time=time_str,
+            )
+
+            pedicure_google_busy = False
+
+            for segment in segments:
+                if segment["resource_type"] != "pedicure":
+                    continue
+
+                segment_start = datetime.strptime(
+                    segment["start_time"],
+                    "%H:%M",
+                )
+                segment_end = datetime.strptime(
+                    segment["end_time"],
+                    "%H:%M",
+                )
+                segment_duration = int(
+                    (segment_end - segment_start).total_seconds() // 60
+                )
+
+                if slot_overlaps_busy(
+                    date=selected_date,
+                    time=segment["start_time"],
+                    duration=segment_duration,
+                    busy_intervals=pedicure_busy_intervals,
+                ):
+                    pedicure_google_busy = True
+                    break
+
+            if pedicure_google_busy:
+                continue
 
         available_times.append(time_str)
 
     return available_times
 
 
-def date_can_be_selected(master, selected_date: str) -> bool:
-    work_start, work_end = get_work_hours_for_date(
-        master["schedule"],
+async def date_can_be_selected(master, selected_date: str) -> bool:
+    work_start, work_end = await get_effective_work_hours(
+        master,
         selected_date,
     )
     return bool(work_start and work_end)
@@ -514,7 +609,7 @@ async def date_has_available_time(
     selected_services,
     selected_date: str,
 ) -> bool:
-    if not date_can_be_selected(master, selected_date):
+    if not await date_can_be_selected(master, selected_date):
         return False
 
     times = await get_available_times(
@@ -580,11 +675,7 @@ async def calendar_keyboard(
     dates_to_check = []
     for week in month_weeks:
         for day in week:
-            if (
-                day.month == month
-                and today <= day <= max_date
-                and date_can_be_selected(master, day.strftime("%Y-%m-%d"))
-            ):
+            if day.month == month and today <= day <= max_date:
                 dates_to_check.append(day)
 
     availability = {}
@@ -1265,6 +1356,25 @@ async def confirm_booking_handler(callback: CallbackQuery, state: FSMContext):
 
     if not selected_services:
         await callback.answer("Послуги не вибрані", show_alert=True)
+        return
+
+    # Повторно перевіряємо Google Calendar безпосередньо перед створенням
+    # бронювання. Це ловить ручні записи, які могли з'явитися після того,
+    # як клієнт уже відкрив список вільних годин.
+    master = await get_master_by_id(data["master_id"])
+    current_available_times = await get_available_times(
+        master,
+        selected_services,
+        data["date"],
+    )
+
+    if data["time"] not in current_available_times:
+        text = (
+            "Este horário já não está disponível. Escolha outro."
+            if language == "pt"
+            else "На жаль, цей час уже зайнятий. Оберіть інший."
+        )
+        await callback.answer(text, show_alert=True)
         return
 
     booking_id = await create_booking_from_selected_services(

@@ -48,6 +48,21 @@ async def create_tables():
         """)
 
         await db.execute("""
+        CREATE TABLE IF NOT EXISTS master_schedule_exceptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            master_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            is_working INTEGER NOT NULL DEFAULT 0,
+            start_time TEXT,
+            end_time TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (master_id) REFERENCES masters (id) ON DELETE CASCADE,
+            UNIQUE(master_id, date)
+        )
+        """)
+
+        await db.execute("""
         CREATE TABLE IF NOT EXISTS salon_resources (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             resource_type TEXT UNIQUE NOT NULL,
@@ -349,6 +364,17 @@ async def create_tables():
             SELECT 1
             FROM services
             WHERE services.id = booking_services.service_id
+        )
+        """)
+
+        # ===== Індекси для винятків графіка =====
+
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS
+        idx_master_schedule_exceptions_master_date
+        ON master_schedule_exceptions (
+            master_id,
+            date
         )
         """)
 
