@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import resource
 from contextlib import suppress
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -28,6 +30,17 @@ from services.notifications import send_client_booking_reminder
 
 LISBON_TZ = ZoneInfo("Europe/Lisbon")
 REMINDER_CHECK_INTERVAL = 300  # 5 хвилин
+
+
+def log_memory(stage: str):
+    """Log process peak RSS for temporary Railway memory diagnostics."""
+    peak_rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    logging.info(
+        "MEMORY_DIAG stage=%s pid=%s peak_rss=%.1f MB",
+        stage,
+        os.getpid(),
+        peak_rss_kb / 1024,
+    )
 
 
 async def reminder_worker(bot: Bot):
@@ -69,12 +82,15 @@ async def reminder_worker(bot: Bot):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
+    log_memory("main_started_after_imports")
 
     await create_tables()
     print("База даних готова ✅")
+    log_memory("after_create_tables")
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+    log_memory("after_bot_dispatcher")
 
     dp.include_router(user_start_router)
     dp.include_router(user_booking_router)
@@ -89,8 +105,10 @@ async def main():
 
     dp.include_router(master_bookings_router)
     dp.include_router(master_schedule_router)
+    log_memory("after_routers")
 
     reminder_task = asyncio.create_task(reminder_worker(bot))
+    log_memory("before_polling")
 
     print("Бот запущений 🚀")
 
