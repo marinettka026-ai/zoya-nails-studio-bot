@@ -252,6 +252,9 @@ async def master_confirm_payment(callback: CallbackQuery):
             f"Data: {booking['date']}\n"
             f"Hora: {booking['time']}\n"
             f"Morada: {SALON_ADDRESS}\n\n"
+            "Contactos das profissionais:\n"
+            "Zoya: +351910886403\n"
+            "Nastia: +34613498768\n\n"
             "Até breve no ZoYA Nails Studio 🌸"
         )
     else:
@@ -262,6 +265,9 @@ async def master_confirm_payment(callback: CallbackQuery):
             f"Дата: {booking['date']}\n"
             f"Час: {booking['time']}\n"
             f"Адреса: {SALON_ADDRESS}\n\n"
+            "Контакти майстрів:\n"
+            "Зоя: +351910886403\n"
+            "Настя: +34613498768\n\n"
             "До зустрічі у ZoYA Nails Studio 🌸"
         )
 
